@@ -1,0 +1,27 @@
+/*
+  Règles toujours actives, indépendamment du réglage "Animations".
+  Masquage des emplacements pub restants côté DOM (en complément du
+  blocage réseau + du nettoyage des données pub côté preload.js).
+*/
+ytmusic-statement-banner-renderer,
+ytmusic-mealbar-promo-renderer,
+[class*="ad-container"],
+[id*="masthead-ad"] {
+  display: none !important;
+}
+
+/* Bouton ⚙️ injecté par inject.js pour ouvrir les paramètres de l'appli */
+#ytmc-settings-btn {
+  background: transparent;
+  border: none;
+  color: inherit;
+  font-size: 17px;
+  cursor: pointer;
+  margin-left: 6px;
+  padding: 6px;
+  border-radius: 50%;
+  transition: background-color 140ms ease;
+}
+#ytmc-settings-btn:hover {
+  background: rgba(255, 255, 255, 0.08);
+}

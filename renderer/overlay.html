@@ -1,0 +1,155 @@
+<!DOCTYPE html>
+<html lang="fr">
+<head>
+<meta charset="utf-8" />
+<title>YTMC Overlay</title>
+<style>
+  * { box-sizing: border-box; }
+  html, body {
+    margin: 0;
+    padding: 0;
+    background: transparent;
+    overflow: hidden;
+    font-family: 'Segoe UI', Roboto, sans-serif;
+  }
+
+  #card {
+    position: fixed;
+    left: 24px;
+    bottom: 24px;
+    display: flex;
+    align-items: center;
+    gap: 14px;
+    padding: 12px 18px 12px 12px;
+    border-radius: 14px;
+    background: rgba(21, 21, 29, 0.82);
+    backdrop-filter: blur(6px);
+    box-shadow: 0 10px 30px rgba(0, 0, 0, 0.35);
+    max-width: 440px;
+    opacity: 0;
+    transform: translateY(12px);
+    transition: opacity 320ms ease, transform 320ms ease;
+  }
+  #card.visible {
+    opacity: 1;
+    transform: translateY(0);
+  }
+
+  #artwork {
+    width: 56px;
+    height: 56px;
+    border-radius: 8px;
+    object-fit: cover;
+    background: #2a2a36;
+    flex-shrink: 0;
+  }
+
+  #texts { min-width: 0; }
+
+  #title {
+    color: #f2f2f5;
+    font-size: 15px;
+    font-weight: 600;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    max-width: 280px;
+  }
+
+  #artist {
+    color: #9a9aa5;
+    font-size: 12px;
+    margin-top: 2px;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    max-width: 280px;
+  }
+
+  #progress-track {
+    margin-top: 8px;
+    width: 100%;
+    height: 3px;
+    border-radius: 2px;
+    background: rgba(255, 255, 255, 0.15);
+    overflow: hidden;
+  }
+  #progress-fill {
+    height: 100%;
+    width: 0%;
+    background: #7c5cff;
+    transition: width 300ms linear;
+  }
+
+  #eq {
+    display: inline-flex;
+    align-items: flex-end;
+    gap: 2px;
+    height: 10px;
+    margin-left: 7px;
+  }
+  #eq span {
+    width: 2px;
+    background: #7c5cff;
+    animation: eq 900ms ease-in-out infinite alternate;
+  }
+  #eq span:nth-child(1) { animation-delay: 0ms; }
+  #eq span:nth-child(2) { animation-delay: 150ms; }
+  #eq span:nth-child(3) { animation-delay: 300ms; }
+  @keyframes eq {
+    0% { height: 3px; }
+    100% { height: 10px; }
+  }
+  .paused #eq { display: none; }
+</style>
+</head>
+<body>
+  <div id="card">
+    <img id="artwork" alt="" />
+    <div id="texts">
+      <div id="title">
+        <span id="title-text">—</span>
+        <span id="eq"><span></span><span></span><span></span></span>
+      </div>
+      <div id="artist">—</div>
+      <div id="progress-track"><div id="progress-fill"></div></div>
+    </div>
+  </div>
+
+  <script>
+    const card = document.getElementById('card');
+    const artwork = document.getElementById('artwork');
+    const titleText = document.getElementById('title-text');
+    const artistEl = document.getElementById('artist');
+    const progressFill = document.getElementById('progress-fill');
+
+    let hideTimeout = null;
+
+    function render(state) {
+      if (!state || !state.trackTitle) {
+        card.classList.remove('visible');
+        return;
+      }
+
+      card.classList.add('visible');
+      card.classList.toggle('paused', !state.isPlaying);
+
+      titleText.textContent = state.trackTitle;
+      artistEl.textContent = state.trackArtist || '';
+      if (state.artwork) artwork.src = state.artwork;
+
+      const ratio =
+        state.duration > 0 ? Math.min(state.currentTime / state.duration, 1) : 0;
+      progressFill.style.width = `${ratio * 100}%`;
+
+      clearTimeout(hideTimeout);
+      hideTimeout = setTimeout(() => card.classList.remove('visible'), 10000);
+    }
+
+    const source = new EventSource('/events');
+    source.onmessage = (e) => {
+      try { render(JSON.parse(e.data)); } catch (err) {}
+    };
+  </script>
+</body>
+</html>
