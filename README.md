@@ -1,67 +1,60 @@
-# ytmc-dashboard-server
+# V Music
 
-Petit serveur qui reçoit, de chaque instance de `ytmusic-custom`, ce qu'elle
-écoute (titre, artiste, play/pause) et affiche un dashboard en temps réel.
-Zéro dépendance — juste Node.js.
+A custom Electron desktop client for [YouTube Music](https://music.youtube.com), with network-level ad blocking and a restyled interface. Not affiliated with YouTube/Google — it's just a wrapper around the official site with some quality-of-life features bolted on.
 
-## Déploiement sur Proxmox
+## Features
 
-Le plus simple : un conteneur LXC léger (Debian/Ubuntu) avec Node.js dedans.
+- 🚫 **Ad blocking** — strips ad-related network requests (video/audio ads, tracking, promo banners) before they even load
+- 🎨 **Restyled UI** — custom CSS with smooth animations (toggleable)
+- 📊 **Taskbar progress bar** — current track progress shown directly on the Windows taskbar icon
+- 🪟 **No more stuck-open window** — fixes the native "leave site?" prompt that used to block the app from closing while music was playing
+- 🖥️ **OBS overlay** — a local Browser Source URL that shows the current track (artwork, title, artist, progress) live in your stream
+- 👥 **Listening dashboard** (optional) — see what track each instance of the app is playing in real time, via [Supabase](https://supabase.com). Off by default per install, togglable anytime in Settings, and the reporting only ever sends: a display name, a random per-install client ID, the current track title/artist, and play/pause state — nothing tied to your Google account
+- ⚙️ **Settings window** — toggle every feature above without touching a config file, persisted across restarts
 
-```bash
-# dans le conteneur LXC
-curl -fsSL https://deb.nodesource.com/setup_20.x | bash -
-apt install -y nodejs
+## Download
 
-mkdir -p /opt/ytmc-dashboard
-# copie server.js et package.json dedans (scp, ou colle le contenu)
-```
+Grab the latest build from the [Releases page](../../releases):
+- `V Music Setup *.exe` — installer (recommended)
+- `V Music *.exe` — portable, no install needed
 
-### Test rapide
+Sign-in uses your own Google account session, exactly like the official site — nothing is shared with anyone else.
 
-```bash
-cd /opt/ytmc-dashboard
-PORT=3939 REPORT_API_KEY=une-cle-secrete DASHBOARD_USER=admin DASHBOARD_PASS=motdepasse node server.js
-```
-
-Ouvre `http://IP-DU-CONTENEUR:3939` dans un navigateur → ça te demande les
-identifiants (Basic Auth), puis affiche le dashboard (vide pour l'instant,
-tant qu'aucun client n'a envoyé de rapport).
-
-### Lancer en permanence (systemd)
+## Development
 
 ```bash
-cp server.js package.json /opt/ytmc-dashboard/
-cp ytmc-dashboard.service /etc/systemd/system/
-nano /etc/systemd/system/ytmc-dashboard.service   # change REPORT_API_KEY et DASHBOARD_PASS
-systemctl daemon-reload
-systemctl enable --now ytmc-dashboard
-systemctl status ytmc-dashboard
+npm install
+npm start
 ```
 
-## Variables d'environnement
+## Build
 
-| Variable | Rôle | Par défaut |
-|---|---|---|
-| `PORT` | Port d'écoute | `3939` |
-| `REPORT_API_KEY` | Clé que les clients doivent fournir pour poster leur état. **Mets-la** si le serveur sort de ton réseau local. | vide (ouvert) |
-| `DASHBOARD_USER` / `DASHBOARD_PASS` | Protège la page du dashboard par mot de passe (Basic Auth) | vide (ouvert) |
+```bash
+npm run dist:win
+```
 
-Si tu restes strictement sur ton LAN, tu peux laisser les deux vides pour
-simplifier — mais garde en tête que n'importe qui sur le réseau peut alors
-voir/poster. Si tu exposes le port sur Internet (reverse proxy, port
-forwarding...), mets impérativement `REPORT_API_KEY` et
-`DASHBOARD_USER`/`DASHBOARD_PASS`.
+Outputs an installer and a portable `.exe` to `release/`.
 
-## Routes
+## Project structure
 
-- `POST /api/report` — un client y poste `{ clientId, username, trackTitle, trackArtist, isPlaying }` (header `x-api-key` si configuré)
-- `GET /` — le dashboard HTML
-- `GET /api/events` — flux SSE utilisé par le dashboard pour se mettre à jour en direct
+```
+main.js              Electron main process: windows, ad block, settings, overlay server, dashboard reporting
+preload.js            Bridge exposed to the renderer (settings, progress, reporting)
+renderer/
+  inject.js           Injected into music.youtube.com: playback detection, UI hooks
+  base.css             Base restyle
+  animations.css        Optional animation layer
+  settings.html/.js    Settings window
+  overlay.html          OBS Browser Source page (served locally)
+assets/icon.ico         App icon
+```
 
-## Vie privée
+## OBS overlay setup
 
-Seuls titre, artiste, statut play/pause, nom affiché et un ID de poste
-transitent. Pas d'historique conservé sur disque : tout est en mémoire, reset
-au redémarrage du serveur. Un client considéré "hors ligne" après 20s sans
-rapport (app fermée, PC éteint, etc.).
+1. Open Settings in the app and enable **Overlay OBS**
+2. Copy the URL shown (defaults to `http://localhost:47811`)
+3. In OBS, add a **Browser Source** and paste that URL
+
+## Listening dashboard
+
+Each install gets a random client ID on first launch. When enabled, it posts the current track + play state to a shared Supabase table roughly once every few seconds — used to power a small real-time dashboard showing who's listening to what. Can be disabled at any time from Settings; when disabled, nothing is sent at all.
