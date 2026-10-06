@@ -1,4 +1,4 @@
-const { app, BrowserWindow, session, ipcMain } = require('electron');
+const { app, BrowserWindow, session, ipcMain, screen } = require('electron');
 const path = require('path');
 const fs = require('fs');
 const os = require('os');
@@ -22,6 +22,10 @@ const store = new Store({
     reportingEnabled: true,
     reportingUsername: os.userInfo().username,
     reportingClientId: null,
+    windowBounds: null,
+    windowMaximized: false,
+    lastUrl: null,
+    lastPlayback: null, // { videoId, position }
   },
 });
 
@@ -201,6 +205,44 @@ function openSettingsWindow() {
   });
 }
 
+// ---------- Mémoire de la fenêtre, de la page et de la lecture ----------
+const MUSIC_ORIGIN = 'https://music.youtube.com';
+
+function isMusicUrl(url) {
+  return typeof url === 'string' && url.startsWith(MUSIC_ORIGIN + '/');
+}
+
+// Position/taille sauvegardées, utilisées seulement si la barre de titre
+// tombe encore sur un écran (écran débranché, résolution changée...).
+function getRestorableBounds() {
+  const b = store.get('windowBounds');
+  if (!b || ![b.x, b.y, b.width, b.height].every(Number.isFinite)) return null;
+  const px = b.x + b.width / 2;
+  const py = b.y + 20;
+  const onScreen = screen.getAllDisplays().some(({ workArea: a }) =>
+    px >= a.x && px < a.x + a.width && py >= a.y && py < a.y + a.height
+  );
+  return onScreen ? b : null;
+}
+
+function saveWindowBounds(win) {
+  if (win.isDestroyed() || win.isMinimized() || win.isFullScreen()) return;
+  store.set('windowMaximized', win.isMaximized());
+  store.set('windowBounds', win.getNormalBounds());
+}
+
+// Dernière position de lecture reçue de la page. Gardée en mémoire et écrite
+// sur disque toutes les 5 s (et à la fermeture) pour ne pas écrire à chaque
+// seconde.
+let pendingPlayback = null;
+let resumeConsumed = false;
+
+function flushPlayback() {
+  if (!pendingPlayback) return;
+  store.set('lastPlayback', pendingPlayback);
+  pendingPlayback = null;
+}
+
 // ---------- Fenêtre principale ----------
 function createWindow() {
   const ytSession = session.fromPartition('persist:ytmusic-custom');
@@ -210,9 +252,12 @@ function createWindow() {
     callback({ cancel: shouldBlock });
   });
 
+  const savedBounds = getRestorableBounds();
+
   const win = new BrowserWindow({
     width: 1280,
     height: 800,
+    ...(savedBounds || {}),
     backgroundColor: '#0b0b0f',
     icon: path.join(__dirname, 'build', 'icon.ico'),
     autoHideMenuBar: true,
@@ -225,7 +270,35 @@ function createWindow() {
   });
 
   mainWindow = win;
-  win.loadURL('https://music.youtube.com');
+  if (store.get('windowMaximized', false)) win.maximize();
+
+  // Sauvegarde de la position/taille (avec un petit délai pour ne pas
+  // écrire pendant tout le glisser/redimensionner).
+  let boundsTimer = null;
+  const scheduleSaveBounds = () => {
+    clearTimeout(boundsTimer);
+    boundsTimer = setTimeout(() => saveWindowBounds(win), 500);
+  };
+  win.on('resize', scheduleSaveBounds);
+  win.on('move', scheduleSaveBounds);
+  win.on('maximize', scheduleSaveBounds);
+  win.on('unmaximize', scheduleSaveBounds);
+  win.on('close', () => {
+    clearTimeout(boundsTimer);
+    saveWindowBounds(win);
+  });
+
+  // On rouvre la dernière page de YouTube Music visitée plutôt que
+  // l'accueil.
+  const lastUrl = store.get('lastUrl');
+  win.loadURL(isMusicUrl(lastUrl) ? lastUrl : MUSIC_ORIGIN);
+
+  const rememberUrl = (event, url, isMainFrame) => {
+    if (isMainFrame === false) return;
+    if (isMusicUrl(url)) store.set('lastUrl', url);
+  };
+  win.webContents.on('did-navigate', rememberUrl);
+  win.webContents.on('did-navigate-in-page', rememberUrl);
 
   // Empêche YouTube Music de bloquer la fermeture de la fenêtre avec un
   // prompt natif "Quitter le site ?" quand une musique est en cours de
@@ -301,10 +374,25 @@ ipcMain.on('report:send', (event, state) => {
 
 ipcMain.handle('report:getClientId', () => store.get('reportingClientId'));
 
+ipcMain.on('playback:save', (event, state) => {
+  if (!state || typeof state.videoId !== 'string' || !Number.isFinite(state.position)) return;
+  pendingPlayback = { videoId: state.videoId, position: state.position };
+});
+
+// Ne rend la position sauvegardée qu'une seule fois par lancement, pour
+// qu'un simple rechargement de page en cours de session ne ramène pas la
+// lecture en arrière.
+ipcMain.handle('playback:getResume', () => {
+  if (resumeConsumed) return null;
+  resumeConsumed = true;
+  return store.get('lastPlayback', null);
+});
+
 // ---------- Cycle de vie ----------
 app.whenReady().then(() => {
   createWindow();
   if (store.get('overlayEnabled', false)) startOverlayServer();
+  setInterval(flushPlayback, 5000);
 
   app.on('activate', () => {
     if (BrowserWindow.getAllWindows().length === 0) createWindow();
@@ -316,6 +404,7 @@ app.on('window-all-closed', () => {
 });
 
 app.on('before-quit', () => {
+  flushPlayback();
   if (mainWindow && !mainWindow.isDestroyed()) mainWindow.setProgressBar(-1);
   stopOverlayServer();
   // Signale l'arrêt tout de suite plutôt que d'attendre le timeout côté

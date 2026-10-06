@@ -17,6 +17,11 @@ window.__ytmcSetProgress = (ratio, isPlaying) =>
 // partir vers le dashboard réseau (toggle désactivable dans les paramètres).
 window.__ytmcSendReport = (state) => ipcRenderer.send('report:send', state);
 
+// Reprise de lecture : on envoie régulièrement (videoId, position) au process
+// principal, et au lancement on lui demande ce qu'il avait gardé.
+window.__ytmcSavePlayback = (state) => ipcRenderer.send('playback:save', state);
+window.__ytmcGetResume = () => ipcRenderer.invoke('playback:getResume');
+
 (function () {
   // Clés connues utilisées par YouTube pour décrire les pubs à jouer dans
   // la réponse JSON du lecteur. On les supprime récursivement.

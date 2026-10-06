@@ -60,7 +60,47 @@
       document.querySelector('ytmusic-player-bar img')?.src ||
       '';
 
-    return { isPlaying, currentTime, duration, ratio, trackTitle, trackArtist, artwork };
+    const videoId = new URL(location.href).searchParams.get('v') || '';
+
+    return { isPlaying, currentTime, duration, ratio, trackTitle, trackArtist, artwork, videoId };
+  }
+
+  // ---------- Reprise de lecture au lancement ----------
+  // Tant que la reprise n'est pas terminée, on n'enregistre rien : sinon la
+  // position 0 du morceau fraîchement rechargé écraserait celle qu'on veut
+  // restaurer.
+  let canSavePlayback = false;
+
+  async function restorePlayback() {
+    try {
+      const resume = window.__ytmcGetResume ? await window.__ytmcGetResume() : null;
+      const currentId = new URL(location.href).searchParams.get('v');
+      if (!resume || !resume.videoId || resume.videoId !== currentId || !(resume.position > 3)) {
+        return;
+      }
+      // Attend que la balise <video> soit prête (métadonnées chargées),
+      // puis se place à la position sauvegardée, en pause.
+      await new Promise((resolve) => {
+        let tries = 0;
+        const timer = setInterval(() => {
+          const video = document.querySelector('video');
+          tries++;
+          if (video && video.readyState >= 1 && isFinite(video.duration) && video.duration > 0) {
+            clearInterval(timer);
+            video.currentTime = Math.min(resume.position, video.duration - 1);
+            video.pause();
+            resolve();
+          } else if (tries > 60) {
+            clearInterval(timer);
+            resolve();
+          }
+        }, 500);
+      });
+    } catch (e) {
+      // pas grave, on lance juste sans reprise
+    } finally {
+      canSavePlayback = true;
+    }
   }
 
   function syncPlaybackState() {
@@ -70,6 +110,10 @@
 
     if (window.__ytmcSetProgress) {
       window.__ytmcSetProgress(info.ratio, info.isPlaying);
+    }
+
+    if (canSavePlayback && window.__ytmcSavePlayback && info.videoId && info.duration > 0) {
+      window.__ytmcSavePlayback({ videoId: info.videoId, position: info.currentTime });
     }
 
     if (window.__ytmcSendReport) {
@@ -84,6 +128,7 @@
     }
   }
 
+  restorePlayback();
   syncPlaybackState();
   setInterval(syncPlaybackState, 1000);
 })();
