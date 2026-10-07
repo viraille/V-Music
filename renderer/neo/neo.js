@@ -73,10 +73,10 @@
   function open(item) {
     if (item.kind === 'song') return playSong(item);
     if (item.browseId) return go({ name: 'detail', browseId: item.browseId, title: item.title, from: current.from || current.name });
-    if (item.play) window.neo.play(item.play);
+    if (item.play) startPlay(item.play, item);
   }
   function playSong(item, playlistId) {
-    window.neo.play({ videoId: item.videoId || item.play?.videoId, playlistId: playlistId || item.play?.playlistId || '' });
+    startPlay({ videoId: item.videoId || item.play?.videoId, playlistId: playlistId || item.play?.playlistId || '' }, item);
   }
 
   function card(item) {
@@ -84,7 +84,7 @@
     if (item.play) {
       const fab = el('span', { class: 'playfab', title: 'Lire' });
       fab.innerHTML = PLAY_SVG;
-      fab.addEventListener('click', (e) => { e.stopPropagation(); window.neo.play(item.play); });
+      fab.addEventListener('click', (e) => { e.stopPropagation(); startPlay(item.play, item); });
       art.append(fab);
     }
     return el('button', { class: `card ${item.kind}`, onclick: () => open(item) }, art,
@@ -160,7 +160,7 @@
         const h = data.header;
         const songs = data.sections.flatMap((s) => s.items).filter((i) => i.kind === 'song');
         const cover = el('div', { class: 'cover' }, img(h.thumb));
-        const play = el('button', { class: 'btn', onclick: () => songs[0] ? playSong(songs[0], h.playlistId) : h.playlistId && window.neo.play({ playlistId: h.playlistId }) }, 'Lecture');
+        const play = el('button', { class: 'btn', onclick: () => songs[0] ? playSong(songs[0], h.playlistId) : h.playlistId && startPlay({ playlistId: h.playlistId }) }, 'Lecture');
         play.insertAdjacentHTML('afterbegin', PLAY_SVG);
         const hero = el('div', { class: 'hero' }, cover, el('div', {}, el('h1', {}, h.title || v.title || ''), el('div', { class: 'sub' }, h.subtitle), play));
         setView(hero, ...data.sections.map((s) => sectionNode(s, h.playlistId)));
@@ -224,17 +224,60 @@
     return url ? url.replace(/=w\d+-h\d+[^&?]*$/, '=w800-h800-l90-rj').replace(/=s\d+[^&?]*$/, '=s800') : '';
   }
 
+  // Chargement : tant que le morceau demandé n'est pas en train de jouer, on affiche
+  // un rond qui tourne à la place de lecture/pause.
+  let pending = null; // { videoId, fromVideoId, timer }
+
+  function syncButtons() {
+    const loading = !!pending;
+    const playing = !!lastState.isPlaying;
+    for (const id of ['c-play', 'f-play']) $('#' + id).classList.toggle('loading', loading);
+    for (const id of ['ico-play', 'f-ico-play']) $('#' + id).toggleAttribute('hidden', loading || playing);
+    for (const id of ['ico-pause', 'f-ico-pause']) $('#' + id).toggleAttribute('hidden', loading || !playing);
+  }
+
+  function stopLoading() {
+    if (!pending) return;
+    clearTimeout(pending.timer);
+    pending = null;
+    syncButtons();
+  }
+
+  function startPlay(target, meta) {
+    clearTimeout(pending && pending.timer);
+    pending = {
+      videoId: (target && target.videoId) || '',
+      fromVideoId: lastState.videoId || '',
+      timer: setTimeout(stopLoading, 25000), // sécurité : on n'affiche jamais le rond indéfiniment
+    };
+    if (meta && meta.title) {
+      $('#player').classList.remove('empty');
+      $('#p-title').textContent = meta.title;
+      $('#p-artist').textContent = meta.subtitle || '';
+      if (meta.thumb) $('#p-img').src = meta.thumb;
+    }
+    syncButtons();
+    window.neo.play(target);
+  }
+
+  function isLoaded(s) {
+    if (!s.isPlaying || !(s.duration > 0)) return false;
+    return pending.videoId ? s.videoId === pending.videoId : s.videoId !== pending.fromVideoId;
+  }
+
   function onState(s) {
     const prevId = lastState.videoId;
     lastState = s;
+    if (pending && isLoaded(s)) stopLoading();
+    // Pendant le chargement, on garde l'affichage du morceau demandé (pas l'ancien)
+    if (pending && !(pending.videoId && s.videoId === pending.videoId)) { syncButtons(); return; }
     const has = !!(s.title || s.videoId);
     $('#player').classList.toggle('empty', !has);
     $('#p-title').textContent = s.title || 'Rien en lecture';
     $('#p-artist').textContent = s.artist || '';
     $('#f-title').textContent = s.title || '';
     $('#f-artist').textContent = s.artist || '';
-    for (const id of ['ico-play', 'f-ico-play']) $('#' + id).toggleAttribute('hidden', !!s.isPlaying);
-    for (const id of ['ico-pause', 'f-ico-pause']) $('#' + id).toggleAttribute('hidden', !s.isPlaying);
+    syncButtons();
 
     const art = bigArt(s.artwork);
     if (art && art !== lastArt) {

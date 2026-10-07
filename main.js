@@ -23,7 +23,7 @@ const store = new Store({
     reportingUsername: os.userInfo().username,
     reportingClientId: null,
     splashEnabled: true,
-    uiMode: 'classic', // 'classic' (site YouTube Music restylé) ou 'neo' (interface maison)
+    uiMode: 'neo', // 'neo' (interface maison, par défaut) ou 'classic' (site YouTube Music restylé)
     windowBounds: null,
     windowMaximized: false,
     lastUrl: null,
@@ -734,14 +734,14 @@ app.whenReady().then(() => {
   // Sans await : la fenêtre s'ouvre tout de suite, les listes s'activent dès
   // qu'elles sont prêtes.
   initListBlocker();
-  if (store.get('uiMode', 'classic') === 'neo') createNeoWindow();
+  if (store.get('uiMode', 'neo') === 'neo') createNeoWindow();
   else createWindow();
   if (store.get('overlayEnabled', false)) startOverlayServer();
   setInterval(flushPlayback, 5000);
 
   app.on('activate', () => {
     if (BrowserWindow.getAllWindows().length === 0) {
-      if (store.get('uiMode', 'classic') === 'neo') createNeoWindow();
+      if (store.get('uiMode', 'neo') === 'neo') createNeoWindow();
       else createWindow();
     }
   });

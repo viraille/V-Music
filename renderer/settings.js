@@ -15,7 +15,7 @@ async function refreshOverlayUrl() {
 
 async function load() {
   const settings = await ipcRenderer.invoke('settings:get');
-  document.getElementById('uiMode').value = settings.uiMode === 'neo' ? 'neo' : 'classic';
+  document.getElementById('uiMode').value = settings.uiMode === 'classic' ? 'classic' : 'neo';
   document.getElementById('adBlock').checked = settings.adBlockEnabled;
   document.getElementById('animations').checked = settings.animationsEnabled;
   document.getElementById('splash').checked = settings.splashEnabled !== false;
