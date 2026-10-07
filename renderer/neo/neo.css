@@ -150,3 +150,9 @@ input[type=range]:hover::-webkit-slider-thumb { transform: scale(1); }
 .loading .spin { display: block; }
 .loading svg { display: none; }
 @keyframes spin { to { transform: rotate(360deg); } }
+
+/* ---------- Bandeau de connexion ---------- */
+.banner { display: flex; align-items: center; justify-content: space-between; gap: 20px; margin: 18px 0 4px; padding: 20px 24px; border-radius: 24px; background: linear-gradient(120deg, color-mix(in srgb, var(--accent) 22%, var(--surface-2)), var(--surface-2)); }
+.banner .bt { font-size: 17px; font-weight: 700; }
+.banner .bs { color: var(--dim); font-size: 13.5px; margin-top: 4px; }
+.banner .btn { flex-shrink: 0; }

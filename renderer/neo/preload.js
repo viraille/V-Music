@@ -10,5 +10,6 @@ contextBridge.exposeInMainWorld('neo', {
   login: () => ipcRenderer.send('neo:login'),
   openSettings: () => ipcRenderer.send('open-settings'),
   getState: () => ipcRenderer.invoke('neo:getState'),
+  onLogin: (cb) => ipcRenderer.on('neo:login-done', () => cb()),
   onState: (cb) => ipcRenderer.on('neo:state', (_e, s) => cb(s)),
 });

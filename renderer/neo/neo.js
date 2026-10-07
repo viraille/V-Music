@@ -53,6 +53,14 @@
   );
   $('#btn-settings').addEventListener('click', () => window.neo.openSettings());
   $('#login').addEventListener('click', () => window.neo.login());
+  window.neo.onLogin(() => { render(); });
+  const loginBanner = () => {
+    const b = el('div', { class: 'banner' },
+      el('div', {}, el('div', { class: 'bt' }, 'Connecte-toi à ton compte Google'),
+        el('div', { class: 'bs' }, 'Pour retrouver tes playlists, tes titres aimés et tes recommandations.')),
+      el('button', { class: 'btn', onclick: () => window.neo.login() }, 'Se connecter'));
+    return b;
+  };
 
   function setView(...nodes) {
     view.replaceChildren(...nodes);
@@ -124,8 +132,8 @@
         const data = await window.neo.home();
         if (my !== token) return;
         $('#login').hidden = !!data.loggedIn;
-        if (!data.sections.length) return message('<b>Rien à afficher pour le moment.</b><br>Vérifie ta connexion, ou connecte-toi pour voir tes recommandations.');
-        setView(...data.sections.map((s) => sectionNode(s)));
+        if (!data.sections.length) return setView(...(data.loggedIn ? [] : [loginBanner()]), el('div', { class: 'msg' }, 'Rien à afficher pour le moment. Vérifie ta connexion internet.'));
+        setView(...(data.loggedIn ? [] : [loginBanner()]), ...data.sections.map((s) => sectionNode(s)));
       } else if (v.name === 'search') {
         if (!v.q) return message('<b>Que veux-tu écouter ?</b><br>Tape un titre, un artiste ou un album dans la barre.');
         skeleton();
@@ -146,7 +154,7 @@
         const data = await window.neo.library(tab);
         if (my !== token) return;
         $('#login').hidden = !!data.loggedIn;
-        if (!data.loggedIn) return setView(bar, Object.assign(el('div', { class: 'msg' }), { innerHTML: '<b>Connecte-toi pour voir ta bibliothèque.</b><br>Utilise le bouton « Se connecter » en haut à droite.' }));
+        if (!data.loggedIn) return setView(bar, loginBanner());
         const items = data.sections.flatMap((s) => s.items);
         if (!items.length) return setView(bar, el('div', { class: 'msg' }, 'Rien ici pour le moment.'));
         const isSongs = tab === 'songs';

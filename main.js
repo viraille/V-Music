@@ -507,6 +507,35 @@ const neoApi = createApi(
   engineLoaded
 );
 
+// Connexion Google : la fenêtre du moteur s'affiche sur la page de connexion, et
+// se referme toute seule dès que la connexion est réussie.
+let loginMode = false;
+const LOGIN_URL =
+  'https://accounts.google.com/ServiceLogin?service=youtube&continue=' +
+  encodeURIComponent('https://music.youtube.com/');
+
+function notifyLogin() {
+  if (mainWindow && !mainWindow.isDestroyed()) mainWindow.webContents.send('neo:login-done');
+}
+
+async function checkLoginDone(eng) {
+  if (!loginMode || eng.isDestroyed()) return;
+  const url = eng.webContents.getURL();
+  if (!isMusicUrl(url) && url !== MUSIC_ORIGIN) return;
+  try {
+    const ok = await eng.webContents.executeJavaScript(
+      '!!(window.ytcfg && window.ytcfg.get && window.ytcfg.get("LOGGED_IN"))'
+    );
+    if (ok) {
+      loginMode = false;
+      eng.hide();
+      notifyLogin();
+    }
+  } catch (e) {
+    // page pas encore prête, on revérifiera au prochain chargement
+  }
+}
+
 function createEngineWindow(ytSession) {
   const eng = new BrowserWindow({
     width: 1000,
@@ -526,6 +555,12 @@ function createEngineWindow(ytSession) {
   });
   engineWindow = eng;
 
+  // Google refuse la connexion dans un navigateur qui se déclare "Electron" :
+  // on présente la même identité que Chrome.
+  eng.webContents.setUserAgent(
+    eng.webContents.getUserAgent().replace(/\s(Electron|ytmusic-custom|v-music)\/\S+/gi, '')
+  );
+
   const lastUrl = store.get('lastUrl');
   eng.loadURL(isMusicUrl(lastUrl) ? lastUrl : MUSIC_ORIGIN);
 
@@ -542,6 +577,7 @@ function createEngineWindow(ytSession) {
     const read = (...p) => fs.readFileSync(path.join(__dirname, ...p), 'utf8');
     eng.webContents.executeJavaScript(read('renderer', 'inject.js')).catch(() => {});
     eng.webContents.executeJavaScript(read('renderer', 'neo', 'engine.js')).catch(() => {});
+    checkLoginDone(eng);
   });
 
   // La croix de la fenêtre de connexion la cache seulement : la lecture continue.
@@ -549,6 +585,10 @@ function createEngineWindow(ytSession) {
     if (!appQuitting) {
       e.preventDefault();
       eng.hide();
+      if (loginMode) {
+        loginMode = false;
+        notifyLogin();
+      }
     }
   });
   eng.on('closed', () => {
@@ -666,6 +706,8 @@ ipcMain.on('neo:cmd', (e, name, arg) => {
 });
 ipcMain.on('neo:login', () => {
   if (!engineWindow || engineWindow.isDestroyed()) return;
+  loginMode = true;
+  engineWindow.loadURL(LOGIN_URL);
   engineWindow.setSize(1000, 720);
   engineWindow.center();
   engineWindow.show();
