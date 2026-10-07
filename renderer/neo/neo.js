@@ -499,6 +499,8 @@
     } catch (e) {
       if (my !== token) return;
       message(`<b>Impossible de charger cette page.</b><br>${String(e.message || e).replace(/^Error invoking remote method '[^']+': Error: /, '')}<br><br>Réessaie dans un instant.`);
+      const box = $('#view .msg');
+      if (box) box.append(el('div', { style: 'margin-top:14px' }, el('button', { class: 'btn ghost', onclick: () => window.neo.showEngine() }, 'Voir la page YouTube Music')));
     }
   }
 

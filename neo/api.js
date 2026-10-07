@@ -37,7 +37,7 @@ function createApi(getEngine, waitLoaded, debugDir) {
       await waitLoaded();
       const script = `(async () => { try {
         const get = (k) => (window.ytcfg && window.ytcfg.get ? window.ytcfg.get(k) : undefined);
-        if (!window.ytcfg) return { __error: 'page pas prête' };
+        if (!window.ytcfg) return { __error: 'page pas prête (' + location.host + ')' };
         const ctx = get('INNERTUBE_CONTEXT') || { client: { clientName: 'WEB_REMIX', clientVersion: '1.20240101.01.00', hl: 'fr', gl: 'FR' } };
         const key = get('INNERTUBE_API_KEY');
         const m = document.cookie.match(/(?:^|; )SAPISID=([^;]+)/) || document.cookie.match(/(?:^|; )__Secure-3PAPISID=([^;]+)/);

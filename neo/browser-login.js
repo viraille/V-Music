@@ -13,6 +13,7 @@ const fs = require('fs');
 const os = require('os');
 const path = require('path');
 const http = require('http');
+const net = require('net');
 const crypto = require('crypto');
 const { spawn } = require('child_process');
 
@@ -237,6 +238,37 @@ const isLoggedIn = (cookies) =>
   cookies.some((c) => c.name === 'SAPISID' && /(^|\.)youtube\.com$/i.test(c.domain.replace(/^\./, '')));
 
 // ---------- Nettoyage des profils temporaires ----------
+function httpJson(url) {
+  return new Promise((resolve, reject) => {
+    const req = http.get(url, { timeout: 2000 }, (res) => {
+      let body = '';
+      res.on('data', (d) => (body += d));
+      res.on('end', () => {
+        try {
+          resolve(JSON.parse(body));
+        } catch (e) {
+          reject(e);
+        }
+      });
+    });
+    req.on('error', reject);
+    req.on('timeout', () => req.destroy(new Error('délai dépassé')));
+  });
+}
+
+// Port DevTools fixe, choisi par nous. Avec "--remote-debugging-port=0", Chrome/Edge active le
+// mode "piloté par un robot" (navigator.webdriver = true) et Google refuse alors la connexion.
+function freePort() {
+  return new Promise((resolve, reject) => {
+    const srv = net.createServer();
+    srv.on('error', reject);
+    srv.listen(0, '127.0.0.1', () => {
+      const { port } = srv.address();
+      srv.close(() => resolve(port));
+    });
+  });
+}
+
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 
 async function removeDir(dir, tries = 12) {
@@ -285,11 +317,12 @@ async function runExternalLogin({ exe, url, timeoutMs = 15 * 60 * 1000, onStatus
   };
 
   try {
+    const debugPort = await freePort();
     child = spawn(
       exe,
       [
         `--user-data-dir=${profile}`,
-        '--remote-debugging-port=0',
+        `--remote-debugging-port=${debugPort}`,
         '--no-first-run',
         '--no-default-browser-check',
         '--disable-sync',
@@ -306,24 +339,20 @@ async function runExternalLogin({ exe, url, timeoutMs = 15 * 60 * 1000, onStatus
       exited = true;
     });
 
-    // Le navigateur écrit le port DevTools dans son profil dès qu'il est prêt.
-    let port = null;
-    let wsPath = null;
-    for (let i = 0; i < 100 && !port; i++) {
-      if (exited) throw fail('launch', 'le navigateur s\'est arrêté');
+    // Dès que le navigateur est prêt, son port DevTools répond avec l'adresse de pilotage.
+    let wsUrl = null;
+    for (let i = 0; i < 100 && !wsUrl; i++) {
+      if (exited) throw fail('launch', "le navigateur s'est arrêté");
       try {
-        const lines = fs.readFileSync(path.join(profile, 'DevToolsActivePort'), 'utf8').split('\n');
-        if (lines[0] && lines[1]) {
-          port = Number(lines[0]);
-          wsPath = lines[1].trim();
-        }
+        const info = await httpJson(`http://127.0.0.1:${debugPort}/json/version`);
+        if (info && info.webSocketDebuggerUrl) wsUrl = info.webSocketDebuggerUrl;
       } catch (e) {}
-      if (!port) await sleep(200);
+      if (!wsUrl) await sleep(200);
     }
-    if (!port) throw fail('launch', 'port DevTools introuvable');
+    if (!wsUrl) throw fail('launch', 'port DevTools introuvable');
 
     try {
-      cdp = await cdpConnect(`ws://127.0.0.1:${port}${wsPath}`);
+      cdp = await cdpConnect(wsUrl);
     } catch (e) {
       throw fail('launch', e.message);
     }

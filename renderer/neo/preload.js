@@ -14,6 +14,7 @@ contextBridge.exposeInMainWorld('neo', {
   play: (target) => ipcRenderer.send('neo:play', target),
   cmd: (name, arg) => ipcRenderer.send('neo:cmd', name, arg),
   login: () => ipcRenderer.send('neo:login'),
+  showEngine: () => ipcRenderer.send('neo:showEngine'),
   openSettings: () => ipcRenderer.send('open-settings'),
   getState: () => ipcRenderer.invoke('neo:getState'),
   onLogin: (cb) => ipcRenderer.on('neo:login-done', () => cb()),

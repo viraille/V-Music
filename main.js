@@ -919,6 +919,14 @@ ipcMain.on('neo:cmd', (e, name, arg) => {
     .catch(() => {});
 });
 ipcMain.on('neo:login', () => openLogin());
+// Montre la page YouTube Music cachée (consentement, vérification...) quand quelque chose bloque.
+ipcMain.on('neo:showEngine', () => {
+  if (!engineWindow || engineWindow.isDestroyed()) return;
+  engineWindow.setSize(1000, 720);
+  engineWindow.center();
+  engineWindow.show();
+  engineWindow.focus();
+});
 ipcMain.on('engine:state', (event, state) => {
   if (!engineWindow || event.sender !== engineWindow.webContents) return;
   latestEngineState = state;
