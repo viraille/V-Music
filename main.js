@@ -1,4 +1,4 @@
-const { app, BrowserWindow, session, ipcMain, screen } = require('electron');
+const { app, BrowserWindow, WebContentsView, session, ipcMain, screen } = require('electron');
 const path = require('path');
 const fs = require('fs');
 const os = require('os');
@@ -284,50 +284,62 @@ function flushPlayback() {
 }
 
 // ---------- Écran de lancement (animation requin) ----------
-// Petite fenêtre sans bordure affichée pendant que YouTube Music charge. Elle
-// reste jusqu'à ce que la fenêtre principale soit prête (et au moins le temps
-// de l'animation), puis les deux s'échangent.
-let splashWindow = null;
+// L'animation s'affiche DANS la fenêtre de l'appli (une vue qui la recouvre)
+// pendant que YouTube Music charge. Elle reste au moins le temps de
+// l'animation, puis disparaît en fondu.
 const SPLASH_MIN_MS = 1100; // animation (~900 ms) + une petite marge
-const SPLASH_MAX_MS = 15000; // sécurité : on ouvre quand même si le chargement traîne
+const SPLASH_MAX_MS = 15000; // sécurité : on retire la vue même si le chargement traîne
 
-function showSplash() {
-  splashWindow = new BrowserWindow({
-    width: 420,
-    height: 420,
-    frame: false,
-    transparent: true,
-    hasShadow: false,
-    resizable: false,
-    movable: false,
-    alwaysOnTop: true,
-    skipTaskbar: true,
-    show: false,
-    center: true,
-    icon: path.join(__dirname, 'build', 'icon.ico'),
-    webPreferences: {
-      contextIsolation: true,
-      nodeIntegration: false,
-    },
+function attachSplash(win) {
+  let view = null;
+  try {
+    view = new WebContentsView({
+      webPreferences: { contextIsolation: true, nodeIntegration: false },
+    });
+  } catch (e) {
+    return () => {};
+  }
+  const fit = () => {
+    if (win.isDestroyed()) return;
+    const [w, h] = win.getContentSize();
+    view.setBounds({ x: 0, y: 0, width: w, height: h });
+  };
+  win.contentView.addChildView(view);
+  fit();
+  win.on('resize', fit);
+  win.on('maximize', fit);
+  win.on('unmaximize', fit);
+  win.on('enter-full-screen', fit);
+  win.on('leave-full-screen', fit);
+  view.webContents.loadFile(path.join(__dirname, 'renderer', 'splash.html'), {
+    query: { embedded: '1' },
   });
-  splashWindow.once('ready-to-show', () => {
-    if (splashWindow && !splashWindow.isDestroyed()) splashWindow.show();
-  });
-  splashWindow.on('closed', () => {
-    splashWindow = null;
-  });
-  splashWindow.loadFile(path.join(__dirname, 'renderer', 'splash.html'));
-}
 
-function closeSplash() {
-  if (splashWindow && !splashWindow.isDestroyed()) splashWindow.close();
+  let removed = false;
+  const remove = () => {
+    if (removed) return;
+    removed = true;
+    const wc = view.webContents;
+    // Fondu de sortie, puis on retire la vue
+    try {
+      wc.executeJavaScript(
+        "document.getElementById('splash').style.transition='opacity 350ms ease';document.getElementById('splash').style.opacity='0';"
+      ).catch(() => {});
+    } catch (e) {}
+    setTimeout(() => {
+      try {
+        if (!win.isDestroyed()) win.contentView.removeChildView(view);
+        if (!wc.isDestroyed()) wc.close();
+      } catch (e) {}
+    }, 400);
+  };
+  return remove;
 }
 
 // ---------- Fenêtre principale ----------
 function createWindow() {
   const useSplash = store.get('splashEnabled', true);
   const splashStartedAt = Date.now();
-  if (useSplash) showSplash();
 
   const ytSession = session.fromPartition('persist:ytmusic-custom');
 
@@ -366,7 +378,6 @@ function createWindow() {
     width: 1280,
     height: 800,
     ...(savedBounds || {}),
-    show: !useSplash, // avec l'écran de lancement, on n'affiche qu'une fois prête
     backgroundColor: '#0b0b0f',
     icon: path.join(__dirname, 'build', 'icon.ico'),
     autoHideMenuBar: true,
@@ -379,26 +390,17 @@ function createWindow() {
   });
 
   mainWindow = win;
-  // Sans écran de lancement, on maximise tout de suite. Avec, on attend le
-  // moment d'afficher (maximize() ferait apparaître la fenêtre trop tôt).
-  if (!useSplash && store.get('windowMaximized', false)) win.maximize();
+  if (store.get('windowMaximized', false)) win.maximize();
 
-  let revealed = false;
-  const revealMainWindow = () => {
-    if (revealed || win.isDestroyed()) return;
-    revealed = true;
-    const wait = Math.max(0, SPLASH_MIN_MS - (Date.now() - splashStartedAt));
-    setTimeout(() => {
-      if (win.isDestroyed()) return;
-      if (store.get('windowMaximized', false)) win.maximize();
-      win.show();
-      win.focus();
-      closeSplash();
-    }, wait);
-  };
+  // Animation de lancement par-dessus la page, retirée quand YouTube Music est chargé
   if (useSplash) {
-    win.once('ready-to-show', revealMainWindow);
-    setTimeout(revealMainWindow, SPLASH_MAX_MS);
+    const removeSplash = attachSplash(win);
+    const done = () => {
+      const wait = Math.max(0, SPLASH_MIN_MS - (Date.now() - splashStartedAt));
+      setTimeout(removeSplash, wait);
+    };
+    win.webContents.once('did-finish-load', done);
+    setTimeout(removeSplash, SPLASH_MAX_MS);
   }
 
   // Sauvegarde de la position/taille (avec un petit délai pour ne pas

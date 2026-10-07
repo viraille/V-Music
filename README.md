@@ -6,7 +6,7 @@ A custom Electron desktop client for [YouTube Music](https://music.youtube.com),
 
 - 🚫 **Ad blocking** — blocks ad-related network requests (built-in rules + regularly refreshed public filter lists), strips ad data from YouTube responses, and skips any ad that still reaches the player
 - 🎨 **Restyled UI** — custom CSS with smooth animations (toggleable)
-- 🦈 **Launch animation** — a short shark splash screen while YouTube Music loads (toggleable)
+- 🦈 **Launch animation** — a short shark animation shown inside the app while YouTube Music loads (toggleable)
 - 📊 **Taskbar progress bar** — current track progress shown directly on the Windows taskbar icon
 - 🪟 **No more stuck-open window** — fixes the native "leave site?" prompt that used to block the app from closing while music was playing
 - 🖥️ **OBS overlay** — a local Browser Source URL that shows the current track (artwork, title, artist, progress) live in your stream
