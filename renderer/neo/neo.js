@@ -391,7 +391,7 @@
 
   function isLoaded(s) {
     if (!s.isPlaying || !(s.duration > 0) || !(s.currentTime > 0)) return false;
-    return pending.videoId ? s.videoId === pending.videoId : s.videoId !== pending.fromVideoId;
+    return pending.videoId ? (s.playerId || s.videoId) === pending.videoId : s.videoId !== pending.fromVideoId;
   }
 
   function onState(s) {

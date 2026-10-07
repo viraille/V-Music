@@ -663,6 +663,24 @@ function createNeoWindow() {
   return win;
 }
 
+// Pendant qu'une nouvelle page se charge, YouTube Music peut jouer quelques secondes
+// n'importe quoi (un ancien morceau mémorisé...). On coupe le son du moteur jusqu'à ce que
+// le bon morceau soit réellement en lecture.
+let muteUntil = null; // identifiant attendu ('' = n'importe lequel qui joue vraiment)
+let muteTimer = null;
+function unmuteEngine() {
+  clearTimeout(muteTimer);
+  muteUntil = null;
+  if (engineWindow && !engineWindow.isDestroyed()) engineWindow.webContents.setAudioMuted(false);
+}
+function muteEngineUntil(videoId) {
+  if (!engineWindow || engineWindow.isDestroyed()) return;
+  muteUntil = videoId || '';
+  engineWindow.webContents.setAudioMuted(true);
+  clearTimeout(muteTimer);
+  muteTimer = setTimeout(unmuteEngine, 12000); // sécurité : jamais muet indéfiniment
+}
+
 function neoPlay(target) {
   if (!engineWindow || engineWindow.isDestroyed() || !target) return;
   const videoId = /^[\w-]{6,20}$/.test(target.videoId || '') ? target.videoId : '';
@@ -674,6 +692,7 @@ function neoPlay(target) {
     : `${MUSIC_ORIGIN}/watch?list=${playlistId}`;
   const hardLoad = () => {
     if (!engineWindow || engineWindow.isDestroyed()) return;
+    muteEngineUntil(videoId);
     engineWindow.webContents.loadURL(url);
   };
   // Avec une playlist/album, on recharge toujours : c'est ce qui garantit que la file
@@ -721,6 +740,10 @@ ipcMain.on('neo:login', () => {
 ipcMain.on('engine:state', (event, state) => {
   if (!engineWindow || event.sender !== engineWindow.webContents) return;
   latestEngineState = state;
+  if (muteUntil !== null && state.isPlaying && state.currentTime > 0.2 && state.playerId &&
+      (!muteUntil || state.playerId === muteUntil)) {
+    unmuteEngine();
+  }
   if (mainWindow && !mainWindow.isDestroyed()) mainWindow.webContents.send('neo:state', state);
 });
 

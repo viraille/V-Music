@@ -33,7 +33,15 @@
     const art = md && md.artwork && md.artwork.length ? md.artwork[md.artwork.length - 1].src : '';
     const bar = document.querySelector('ytmusic-player-bar');
     const url = new URL(location.href);
+    // Identifiant du morceau réellement chargé dans le lecteur (peut différer de l'adresse
+    // de la page pendant quelques secondes au chargement)
+    let playerId = '';
+    try {
+      const mp = document.querySelector('#movie_player');
+      playerId = (mp && mp.getVideoData && mp.getVideoData().video_id) || '';
+    } catch (e) {}
     return {
+      playerId,
       videoId: url.searchParams.get('v') || '',
       playlistId: url.searchParams.get('list') || '',
       title: (md && md.title) || bar?.querySelector('.title')?.textContent?.trim() || '',
