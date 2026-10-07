@@ -2,7 +2,7 @@
 // Appels à l'API interne de YouTube Music. Ils sont exécutés DANS la page
 // YouTube Music cachée (le "moteur") : elle a déjà la session connectée, le
 // bon contexte et le bon domaine, donc pas besoin de gérer cookies/CORS nous-mêmes.
-const { parseSections, parseDetail } = require('./parse');
+const { parseSections, parseDetail, parseContinuation } = require('./parse');
 
 const fs = require('fs');
 const path = require('path');
@@ -82,6 +82,11 @@ function createApi(getEngine, waitLoaded, debugDir) {
       const j = await call('browse', { browseId });
       return parseDetail(j, browseId);
     },
+    async more(token) {
+      if (!/^[\w%=.~-]{10,4000}$/.test(token)) throw new Error('jeton invalide');
+      const j = await call('browse', { continuation: token });
+      return parseContinuation(j);
+    },
     async library(kind) {
       const ids = {
         playlists: 'FEmusic_liked_playlists',
@@ -92,7 +97,7 @@ function createApi(getEngine, waitLoaded, debugDir) {
       if (!ids[kind]) throw new Error('catégorie inconnue');
       const j = await call('browse', { browseId: ids[kind] });
       const d = parseDetail(j, ids[kind]);
-      return { loggedIn: j.__loggedIn, header: d.header, sections: d.sections };
+      return { loggedIn: j.__loggedIn, header: d.header, sections: d.sections, continuation: d.continuation };
     },
   };
 }

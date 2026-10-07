@@ -28,3 +28,9 @@ assert.equal(d.header.title, 'Mon album'); assert.equal(d.header.playlistId, 'OL
 assert.ok(d.sections[0].items[0].thumb.includes('w600'));
 assert.deepEqual(parseSections({}), []); assert.deepEqual(parseSections(null), []);
 console.log('parse OK');
+const { parseContinuation } = require('./parse');
+const cont = parseContinuation({ onResponseReceivedActions: [{ appendContinuationItemsAction: { continuationItems: [
+  { musicResponsiveListItemRenderer: { flexColumns: [{ musicResponsiveListItemFlexColumnRenderer: { text: { runs: [{ text: 'Suite 1' }] } } }], playlistItemData: { videoId: 'vid00000002' } } },
+  { continuationItemRenderer: { continuationEndpoint: { continuationCommand: { token: 'TOKEN_SUIVANT_123' } } } } ] } }] });
+assert.equal(cont.items.length, 1); assert.equal(cont.token, 'TOKEN_SUIVANT_123');
+console.log('continuation OK');

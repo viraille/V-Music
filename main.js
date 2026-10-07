@@ -697,6 +697,7 @@ const NEO_COMMANDS = new Set(['toggle', 'play', 'pause', 'next', 'prev', 'seek',
 ipcMain.handle('neo:home', () => neoApi.home());
 ipcMain.handle('neo:search', (e, q) => neoApi.search(String(q || '').slice(0, 200)));
 ipcMain.handle('neo:browse', (e, id) => neoApi.browse(String(id || '')));
+ipcMain.handle('neo:more', (e, token) => neoApi.more(String(token || '')));
 ipcMain.handle('neo:library', (e, kind) => neoApi.library(String(kind || '')));
 ipcMain.handle('neo:getState', () => latestEngineState);
 ipcMain.on('neo:play', (e, target) => neoPlay(target));

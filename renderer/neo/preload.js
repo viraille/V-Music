@@ -4,6 +4,7 @@ contextBridge.exposeInMainWorld('neo', {
   home: () => ipcRenderer.invoke('neo:home'),
   search: (q) => ipcRenderer.invoke('neo:search', q),
   browse: (id) => ipcRenderer.invoke('neo:browse', id),
+  more: (token) => ipcRenderer.invoke('neo:more', token),
   library: (kind) => ipcRenderer.invoke('neo:library', kind),
   play: (target) => ipcRenderer.send('neo:play', target),
   cmd: (name, arg) => ipcRenderer.send('neo:cmd', name, arg),

@@ -134,6 +134,35 @@
     return wrap;
   }
 
+  // Chargement automatique de la suite d'une longue liste quand on arrive en bas
+  function autoMore(token, playlistId, fallbackThumb) {
+    if (!token) return;
+    const list = [...view.querySelectorAll('.cols2.list')].pop();
+    if (!list) return;
+    const sentinel = el('div', { style: 'height:60px' });
+    list.after(sentinel);
+    let busy = false, tok = token;
+    const my = token_();
+    const obs = new IntersectionObserver(async (entries) => {
+      if (busy || !entries.some((e) => e.isIntersecting)) return;
+      if (my !== token_()) return obs.disconnect();
+      busy = true;
+      try {
+        const r = await window.neo.more(tok);
+        if (my !== token_()) return obs.disconnect();
+        for (const it of r.items) {
+          if (!it.thumb && fallbackThumb) it.thumb = fallbackThumb;
+          list.append(listRow(it, playlistId));
+        }
+        tok = r.token;
+        if (!tok || !r.items.length) { obs.disconnect(); sentinel.remove(); }
+      } catch (e) { obs.disconnect(); sentinel.remove(); }
+      busy = false;
+    }, { root: view, rootMargin: '600px' });
+    obs.observe(sentinel);
+  }
+  const token_ = () => token;
+
   // ---------- vues ----------
   async function render() {
     const my = ++token;
@@ -167,12 +196,13 @@
         if (my !== token) return;
         $('#login').hidden = !!data.loggedIn;
         if (!data.loggedIn) return setView(bar, loginBanner());
-        const items = data.sections.flatMap((s) => s.items);
+        const items = data.sections.flatMap((s) => s.items).filter((i) => i.browseId || i.play);
         if (!items.length) return setView(bar, el('div', { class: 'msg' }, 'Rien ici pour le moment.'));
         const isSongs = tab === 'songs';
         setView(bar, isSongs
           ? el('div', { class: 'cols2 list', style: 'margin-top:18px' }, items.map((i) => songRow(i, data.header?.playlistId || 'LM')))
           : el('div', { class: 'grid', style: 'margin-top:20px' }, items.map(card)));
+        if (isSongs) autoMore(data.continuation, data.header?.playlistId || 'LM', '');
       } else if (v.name === 'detail') {
         skeleton();
         const data = await window.neo.browse(v.browseId);
@@ -184,6 +214,7 @@
         play.insertAdjacentHTML('afterbegin', PLAY_SVG);
         const hero = el('div', { class: 'hero' }, cover, el('div', {}, el('h1', {}, h.title || v.title || ''), el('div', { class: 'sub' }, h.subtitle), play));
         setView(hero, ...data.sections.map((s) => sectionNode(s, h.playlistId)));
+        autoMore(data.continuation, h.playlistId, h.thumb);
       }
     } catch (e) {
       if (my !== token) return;

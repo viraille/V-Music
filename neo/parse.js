@@ -216,7 +216,35 @@ function parseDetail(json, browseId) {
   };
   // Les pistes d'un album n'ont pas de pochette : on met celle de l'en-tête.
   for (const s of sections) for (const it of s.items) if (!it.thumb) it.thumb = header.thumb;
-  return { header, sections };
+  return { header, sections, continuation: findToken(json) };
 }
 
-module.exports = { parseSections, parseDetail, text, sized };
+// Jeton pour charger la suite d'une longue liste (au-delà des 100 premiers titres).
+function findToken(node, depth = 0) {
+  if (!node || typeof node !== 'object' || depth > 40) return '';
+  if (node.continuationCommand && node.continuationCommand.token) return node.continuationCommand.token;
+  if (node.nextContinuationData && node.nextContinuationData.continuation) return node.nextContinuationData.continuation;
+  for (const v of Object.values(node)) {
+    const t = findToken(v, depth + 1);
+    if (t) return t;
+  }
+  return '';
+}
+
+// Réponse "suite" : tous les titres/cartes trouvés + éventuel jeton suivant.
+function parseContinuation(json) {
+  const items = [];
+  const visit = (node, depth) => {
+    if (!node || typeof node !== 'object' || depth > 40) return;
+    if (Array.isArray(node)) {
+      const found = collect(node);
+      if (found.length) return void items.push(...found);
+      return node.forEach((n) => visit(n, depth + 1));
+    }
+    for (const v of Object.values(node)) visit(v, depth + 1);
+  };
+  visit(json, 0);
+  return { items, token: findToken(json) };
+}
+
+module.exports = { parseSections, parseDetail, parseContinuation, findToken, text, sized };
