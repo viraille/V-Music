@@ -11,6 +11,22 @@
     return !!el;
   };
 
+  // Mode "hold" : quand l'interface suit sa propre file d'attente, on fige la lecture juste
+  // avant la fin du morceau. Sans ça, YouTube Music enchaîne tout seul sur SON morceau
+  // suivant (pas forcément le bon) avant que l'interface ait pu réagir.
+  let hold = false;
+  let heldAtEnd = false;
+
+  setInterval(() => {
+    const v = video();
+    if (!hold || !v || heldAtEnd) return;
+    if (isFinite(v.duration) && v.duration > 1 && !v.paused && v.duration - v.currentTime < 0.35) {
+      v.pause();
+      heldAtEnd = true;
+      publish();
+    }
+  }, 60);
+
   function readState() {
     const v = video();
     const md = navigator.mediaSession && navigator.mediaSession.metadata;
@@ -28,22 +44,26 @@
       currentTime: v ? v.currentTime || 0 : 0,
       duration: v && isFinite(v.duration) ? v.duration : 0,
       volume: v ? v.volume : 1,
+      hold,
+      ended: heldAtEnd || (!!v && v.ended),
     };
   }
 
-  setInterval(() => {
+  function publish() {
     try {
       if (window.__ytmcEngineState) window.__ytmcEngineState(readState());
     } catch (e) {}
-  }, 500);
+  }
+  setInterval(publish, 500);
 
   window.__neo = {
-    toggle() { const v = video(); if (v) (v.paused ? v.play() : v.pause()); },
-    play() { const v = video(); if (v) v.play(); },
+    toggle() { const v = video(); if (!v) return; if (v.paused) { heldAtEnd = false; v.play(); } else v.pause(); },
+    play() { const v = video(); if (v) { heldAtEnd = false; v.play(); } },
     pause() { const v = video(); if (v) v.pause(); },
     next() { return click('ytmusic-player-bar .next-button'); },
     prev() { return click('ytmusic-player-bar .previous-button'); },
     seek(t) { const v = video(); if (v && isFinite(t)) v.currentTime = Math.max(0, t); },
+    hold(on) { hold = !!on; if (!hold) heldAtEnd = false; },
     volume(x) { const v = video(); if (v && isFinite(x)) v.volume = Math.min(1, Math.max(0, x)); },
     // Changement de morceau sans recharger la page, si YouTube Music le permet
     open(videoId, playlistId) {

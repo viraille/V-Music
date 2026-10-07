@@ -692,7 +692,7 @@ function neoPlay(target) {
     .catch(hardLoad);
 }
 
-const NEO_COMMANDS = new Set(['toggle', 'play', 'pause', 'next', 'prev', 'seek', 'volume']);
+const NEO_COMMANDS = new Set(['toggle', 'play', 'pause', 'next', 'prev', 'seek', 'volume', 'hold']);
 
 ipcMain.handle('neo:home', () => neoApi.home());
 ipcMain.handle('neo:search', (e, q) => neoApi.search(String(q || '').slice(0, 200)));
@@ -703,7 +703,8 @@ ipcMain.handle('neo:getState', () => latestEngineState);
 ipcMain.on('neo:play', (e, target) => neoPlay(target));
 ipcMain.on('neo:cmd', (e, name, arg) => {
   if (!NEO_COMMANDS.has(name) || !engineWindow || engineWindow.isDestroyed()) return;
-  const a = typeof arg === 'number' && Number.isFinite(arg) ? String(arg) : '';
+  const a =
+    typeof arg === 'number' && Number.isFinite(arg) ? String(arg) : typeof arg === 'boolean' ? String(arg) : '';
   engineWindow.webContents
     .executeJavaScript(`window.__neo && window.__neo.${name}(${a})`)
     .catch(() => {});

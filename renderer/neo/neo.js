@@ -356,6 +356,7 @@
 
   async function startPlay(target, meta, opts = {}) {
     if (!opts.keepQueue) queue = null;
+    if (queue) queue.endFor = '';
     clearTimeout(pending && pending.timer);
     const mine = {
       videoId: (target && target.videoId) || '',
@@ -397,24 +398,31 @@
     const prevId = lastState.videoId;
     lastState = s;
     if (pending && isLoaded(s)) stopLoading();
-    if (queue && queue.shuffled && !pending && s.videoId) {
-      // Fin de morceau : on passe nous-mêmes au suivant de l'ordre mélangé, un poil avant la fin
-      if (s.isPlaying && s.duration > 0 && s.duration - s.currentTime < 0.9 && queue.endFor !== s.videoId) {
+    if (queue && !pending && s.videoId) {
+      // On suit nous-mêmes la liste : l'engin fige la lecture juste avant la fin du morceau
+      // (mode "hold") et c'est nous qui lançons le bon morceau suivant.
+      if (!s.hold) window.neo.cmd('hold', true);
+      if (s.ended && queue.endFor !== s.videoId) {
         queue.endFor = s.videoId;
-        nextTrack();
-      } else if (s.videoId !== queue.ids[queue.i] && queue.i + 1 < queue.ids.length) {
-        // YouTube Music a avancé de lui-même dans l'ordre normal : on reprend l'ordre mélangé
-        queue.i += 1;
-        startPlay({ videoId: queue.ids[queue.i], playlistId: queue.playlistId }, null, { keepQueue: true });
+        if (queue.i + 1 < queue.ids.length) nextTrack();
+        else { queue = null; window.neo.cmd('hold', false); window.neo.cmd('play'); } // fin de liste : YouTube Music continue
+      } else if (!s.ended) {
+        const idx = queue.ids.indexOf(s.videoId);
+        if (queue.shuffled) {
+          if (s.videoId !== queue.ids[queue.i] && queue.i + 1 < queue.ids.length) {
+            queue.i += 1;
+            startPlay({ videoId: queue.ids[queue.i], playlistId: queue.playlistId }, null, { keepQueue: true });
+          }
+        } else if (idx >= 0) {
+          queue.i = idx;
+        } else if (s.playlistId && s.playlistId !== queue.playlistId && queue.i + 1 < queue.ids.length) {
+          // YouTube Music est sorti de la playlist : on revient dessus
+          queue.i += 1;
+          startPlay({ videoId: queue.ids[queue.i], playlistId: queue.playlistId }, null, { keepQueue: true });
+        }
       }
-    } else if (queue && !pending && s.videoId) {
-      const idx = queue.ids.indexOf(s.videoId);
-      if (idx >= 0) queue.i = idx;
-      else if (s.playlistId && s.playlistId !== queue.playlistId && queue.i + 1 < queue.ids.length) {
-        // YouTube Music est sorti de la playlist (ex. radio à la fin d'un titre) : on revient dessus
-        queue.i += 1;
-        startPlay({ videoId: queue.ids[queue.i], playlistId: queue.playlistId }, null, { keepQueue: true });
-      }
+    } else if (!queue && s.hold) {
+      window.neo.cmd('hold', false);
     }
     // Pendant le chargement, on garde l'affichage du morceau demandé (pas l'ancien)
     if (pending && !(pending.videoId && s.videoId === pending.videoId)) { syncButtons(); return; }
