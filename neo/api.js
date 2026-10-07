@@ -4,7 +4,25 @@
 // bon contexte et le bon domaine, donc pas besoin de gérer cookies/CORS nous-mêmes.
 const { parseSections, parseDetail } = require('./parse');
 
-function createApi(getEngine, waitLoaded) {
+const fs = require('fs');
+const path = require('path');
+
+// En développement (appli non installée), on garde les dernières réponses brutes
+// de YouTube Music dans ./debug pour pouvoir comprendre pourquoi une page est
+// vide ou cassée. Ce dossier n'est jamais publié sur GitHub (.gitignore).
+function dump(debugDir, name, data) {
+  if (!debugDir) return;
+  try {
+    fs.mkdirSync(debugDir, { recursive: true });
+    fs.writeFileSync(path.join(debugDir, name), typeof data === 'string' ? data : JSON.stringify(data, null, 1));
+    const files = fs.readdirSync(debugDir).filter((f) => f.endsWith('.json')).sort();
+    for (const f of files.slice(0, Math.max(0, files.length - 25))) fs.unlinkSync(path.join(debugDir, f));
+  } catch (e) {
+    /* le debug ne doit jamais gêner l'appli */
+  }
+}
+
+function createApi(getEngine, waitLoaded, debugDir) {
   async function call(endpoint, body) {
     if (!['browse', 'search'].includes(endpoint)) throw new Error('endpoint refusé');
     for (let attempt = 0; attempt < 4; attempt++) {
@@ -38,7 +56,13 @@ function createApi(getEngine, waitLoaded) {
       } catch (e) {
         res = { __error: e.message };
       }
-      if (res && !res.__error) return res;
+      if (res && !res.__error) {
+        dump(debugDir, `${Date.now()}-${endpoint}.json`, { request: body, response: res });
+        return res;
+      }
+      if (attempt === 3) {
+        dump(debugDir, `${Date.now()}-${endpoint}-ERROR.json`, { request: body, error: res && res.__error });
+      }
       if (attempt === 3) throw new Error(res?.__error || 'réponse vide');
       await new Promise((r) => setTimeout(r, 1000)); // page en cours de rechargement : on réessaie
     }

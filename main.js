@@ -504,7 +504,8 @@ function engineLoaded(timeout = 20000) {
 
 const neoApi = createApi(
   () => (engineWindow && !engineWindow.isDestroyed() ? engineWindow.webContents : null),
-  engineLoaded
+  engineLoaded,
+  app.isPackaged ? null : path.join(__dirname, 'debug')
 );
 
 // Connexion Google : la fenêtre du moteur s'affiche sur la page de connexion, et
@@ -675,7 +676,9 @@ function neoPlay(target) {
     if (!engineWindow || engineWindow.isDestroyed()) return;
     engineWindow.webContents.loadURL(url);
   };
-  if (!videoId) return hardLoad();
+  // Avec une playlist/album, on recharge toujours : c'est ce qui garantit que la file
+  // d'attente est bien celle de la playlist (et que « suivant » passe au morceau suivant).
+  if (!videoId || playlistId) return hardLoad();
   // D'abord un changement "en place" (instantané). On vérifie que ça a marché, sinon on recharge.
   wc.executeJavaScript(
     `window.__neo ? window.__neo.open(${JSON.stringify(videoId)}, ${JSON.stringify(playlistId)}) : false`
