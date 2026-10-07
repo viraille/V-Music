@@ -608,8 +608,8 @@ function createNeoWindow() {
   const win = new BrowserWindow({
     width: 1180,
     height: 760,
-    minWidth: 760,
-    minHeight: 520,
+    minWidth: 340,
+    minHeight: 420,
     ...(savedBounds || {}),
     backgroundColor: '#111116',
     icon: path.join(__dirname, 'build', 'icon.ico'),
