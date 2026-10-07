@@ -241,7 +241,6 @@
       lastArt = art;
       $('#p-img').src = s.artwork;
       $('#f-img').src = art;
-      $('#f-bg').style.backgroundImage = `url("${art}")`;
     }
     if (!seeking) {
       const r = s.duration > 0 ? s.currentTime / s.duration : 0;
