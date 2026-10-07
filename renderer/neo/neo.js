@@ -27,6 +27,10 @@
   };
   const PLAY_SVG = '<svg viewBox="0 0 24 24"><path d="M8 5v14l11-7z"/></svg>';
 
+  // Liste affichée en ce moment (pour savoir quel est le « morceau suivant ») et file en cours.
+  let ctx = { playlistId: '', ids: [] };
+  let queue = null; // { playlistId, ids, i }
+
   // ---------- navigation ----------
   let current = { name: 'home' };
   const stack = [];
@@ -88,7 +92,12 @@
     if (item.play) startPlay(item.play, item);
   }
   function playSong(item, playlistId) {
-    startPlay({ videoId: item.videoId || item.play?.videoId, playlistId: playlistId || item.play?.playlistId || '' }, item);
+    const vid = item.videoId || item.play?.videoId;
+    const pid = playlistId || item.play?.playlistId || '';
+    queue = pid && ctx.playlistId === pid && ctx.ids.includes(vid)
+      ? { playlistId: pid, ids: ctx.ids, i: ctx.ids.indexOf(vid) }
+      : null;
+    startPlay({ videoId: item.videoId || item.play?.videoId, playlistId: playlistId || item.play?.playlistId || '' }, item, { keepQueue: true });
   }
 
   function card(item) {
@@ -143,6 +152,7 @@
     list.after(sentinel);
     let busy = false, tok = token;
     const my = token_();
+    const c = ctx;
     const obs = new IntersectionObserver(async (entries) => {
       if (busy || !entries.some((e) => e.isIntersecting)) return;
       if (my !== token_()) return obs.disconnect();
@@ -153,6 +163,7 @@
         for (const it of r.items) {
           if (!it.thumb && fallbackThumb) it.thumb = fallbackThumb;
           list.append(listRow(it, playlistId));
+          if (it.kind === 'song' && it.videoId && c.ids) c.ids.push(it.videoId);
         }
         tok = r.token;
         if (!tok || !r.items.length) { obs.disconnect(); sentinel.remove(); }
@@ -174,6 +185,7 @@
         if (my !== token) return;
         $('#login').hidden = !!data.loggedIn;
         if (!data.sections.length) return setView(...(data.loggedIn ? [] : [loginBanner()]), el('div', { class: 'msg' }, 'Rien à afficher pour le moment. Vérifie ta connexion internet.'));
+        ctx = { playlistId: '', ids: [] };
         setView(...(data.loggedIn ? [] : [loginBanner()]), ...data.sections.map((s) => sectionNode(s)));
       } else if (v.name === 'search') {
         if (!v.q) return message('<b>Que veux-tu écouter ?</b><br>Tape un titre, un artiste ou un album dans la barre.');
@@ -199,6 +211,7 @@
         const items = data.sections.flatMap((s) => s.items).filter((i) => i.browseId || i.play);
         if (!items.length) return setView(bar, el('div', { class: 'msg' }, 'Rien ici pour le moment.'));
         const isSongs = tab === 'songs';
+        ctx = isSongs ? { playlistId: data.header?.playlistId || 'LM', ids: items.filter((i) => i.kind === 'song').map((i) => i.videoId) } : { playlistId: '', ids: [] };
         setView(bar, isSongs
           ? el('div', { class: 'cols2 list', style: 'margin-top:18px' }, items.map((i) => songRow(i, data.header?.playlistId || 'LM')))
           : el('div', { class: 'grid', style: 'margin-top:20px' }, items.map(card)));
@@ -213,6 +226,7 @@
         const play = el('button', { class: 'btn', onclick: () => songs[0] ? playSong(songs[0], h.playlistId) : h.playlistId && startPlay({ playlistId: h.playlistId }) }, 'Lecture');
         play.insertAdjacentHTML('afterbegin', PLAY_SVG);
         const hero = el('div', { class: 'hero' }, cover, el('div', {}, el('h1', {}, h.title || v.title || ''), el('div', { class: 'sub' }, h.subtitle), play));
+        ctx = { playlistId: h.playlistId, ids: songs.map((i) => i.videoId) };
         setView(hero, ...data.sections.map((s) => sectionNode(s, h.playlistId)));
         autoMore(data.continuation, h.playlistId, h.thumb);
       }
@@ -294,7 +308,8 @@
     syncButtons();
   }
 
-  async function startPlay(target, meta) {
+  async function startPlay(target, meta, opts = {}) {
+    if (!opts.keepQueue) queue = null;
     clearTimeout(pending && pending.timer);
     const mine = {
       videoId: (target && target.videoId) || '',
@@ -316,8 +331,10 @@
         const d = await window.neo.browse('VL' + target.playlistId);
         const first = d.sections.flatMap((s) => s.items).find((i) => i.kind === 'song' && i.videoId);
         if (first) {
+          const ids = d.sections.flatMap((s) => s.items).filter((i) => i.kind === 'song' && i.videoId).map((i) => i.videoId);
           target = { videoId: first.videoId, playlistId: target.playlistId };
           mine.videoId = first.videoId;
+          queue = { playlistId: target.playlistId, ids, i: 0 };
         }
       } catch (e) { /* on tente quand même avec la playlist seule */ }
       if (pending !== mine) return; // l'utilisateur a cliqué sur autre chose entre-temps
@@ -334,6 +351,15 @@
     const prevId = lastState.videoId;
     lastState = s;
     if (pending && isLoaded(s)) stopLoading();
+    if (queue && !pending && s.videoId) {
+      const idx = queue.ids.indexOf(s.videoId);
+      if (idx >= 0) queue.i = idx;
+      else if (s.playlistId && s.playlistId !== queue.playlistId && queue.i + 1 < queue.ids.length) {
+        // YouTube Music est sorti de la playlist (ex. radio à la fin d'un titre) : on revient dessus
+        queue.i += 1;
+        startPlay({ videoId: queue.ids[queue.i], playlistId: queue.playlistId }, null, { keepQueue: true });
+      }
+    }
     // Pendant le chargement, on garde l'affichage du morceau demandé (pas l'ancien)
     if (pending && !(pending.videoId && s.videoId === pending.videoId)) { syncButtons(); return; }
     const has = !!(s.title || s.videoId);
@@ -378,10 +404,27 @@
   }
   $('#vol').addEventListener('input', (e) => { setRange(e.target, e.target.value / 100); window.neo.cmd('volume', e.target.value / 100); });
 
+  // Suivant / précédent : on suit nous-mêmes la liste affichée, pour ne jamais sortir de la playlist.
+  function nextTrack() {
+    if (queue && queue.i + 1 < queue.ids.length) {
+      queue.i += 1;
+      return startPlay({ videoId: queue.ids[queue.i], playlistId: queue.playlistId }, null, { keepQueue: true });
+    }
+    window.neo.cmd('next');
+  }
+  function prevTrack() {
+    if (queue && !(lastState.currentTime > 3) && queue.i > 0) {
+      queue.i -= 1;
+      return startPlay({ videoId: queue.ids[queue.i], playlistId: queue.playlistId }, null, { keepQueue: true });
+    }
+    if (queue) return window.neo.cmd('seek', 0);
+    window.neo.cmd('prev');
+  }
+
   const toggle = () => window.neo.cmd('toggle');
   for (const id of ['c-play', 'f-play']) $('#' + id).addEventListener('click', toggle);
-  for (const id of ['c-prev', 'f-prev']) $('#' + id).addEventListener('click', () => window.neo.cmd('prev'));
-  for (const id of ['c-next', 'f-next']) $('#' + id).addEventListener('click', () => window.neo.cmd('next'));
+  for (const id of ['c-prev', 'f-prev']) $('#' + id).addEventListener('click', prevTrack);
+  for (const id of ['c-next', 'f-next']) $('#' + id).addEventListener('click', nextTrack);
   $('#p-open').addEventListener('click', () => { if (lastState.title) $('#full').hidden = false; });
   $('#f-close').addEventListener('click', () => ($('#full').hidden = true));
   document.addEventListener('keydown', (e) => {
