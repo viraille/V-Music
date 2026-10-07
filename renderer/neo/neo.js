@@ -14,6 +14,8 @@
     for (const kid of kids.flat()) if (kid != null) n.append(kid.nodeType ? kid : document.createTextNode(kid));
     return n;
   };
+  // « -2:05 / 3:20 » : temps restant puis durée totale
+  const timeLeft = (cur, dur) => (dur > 0 ? `-${fmt(Math.max(0, dur - cur))} / ${fmt(dur)}` : '0:00');
   const fmt = (s) => {
     s = Math.max(0, Math.floor(s || 0));
     return `${Math.floor(s / 60)}:${String(s % 60).padStart(2, '0')}`;
@@ -67,7 +69,7 @@
   };
 
   function setView(...nodes) {
-    view.replaceChildren(...nodes);
+    view.replaceChildren(...nodes.filter(Boolean));
     view.classList.remove('view-enter');
     void view.offsetWidth;
     view.classList.add('view-enter');
@@ -150,29 +152,69 @@
     if (!list) return;
     const sentinel = el('div', { style: 'height:60px' });
     list.after(sentinel);
-    let busy = false, tok = token;
     const my = token_();
     const c = ctx;
-    const obs = new IntersectionObserver(async (entries) => {
-      if (busy || !entries.some((e) => e.isIntersecting)) return;
-      if (my !== token_()) return obs.disconnect();
-      busy = true;
-      try {
-        const r = await window.neo.more(tok);
-        if (my !== token_()) return obs.disconnect();
-        for (const it of r.items) {
-          if (!it.thumb && fallbackThumb) it.thumb = fallbackThumb;
-          list.append(listRow(it, playlistId));
-          if (it.kind === 'song' && it.videoId && c.ids) c.ids.push(it.videoId);
-        }
-        tok = r.token;
-        if (!tok || !r.items.length) { obs.disconnect(); sentinel.remove(); }
-      } catch (e) { obs.disconnect(); sentinel.remove(); }
-      busy = false;
+    let tok = token;
+    let running = null;
+    let obs = null;
+    const finish = () => { tok = ''; if (obs) obs.disconnect(); sentinel.remove(); };
+
+    // Charge la page suivante de la liste ; renvoie true s'il en reste.
+    c.loadMore = () => {
+      if (!tok) return Promise.resolve(false);
+      if (running) return running;
+      running = (async () => {
+        try {
+          const r = await window.neo.more(tok);
+          if (my !== token_()) { finish(); return false; }
+          for (const it of r.items) {
+            if (!it.thumb && fallbackThumb) it.thumb = fallbackThumb;
+            list.append(listRow(it, playlistId));
+            if (it.kind === 'song' && it.videoId && !c.ids.includes(it.videoId)) c.ids.push(it.videoId);
+          }
+          tok = r.token;
+          if (!tok || !r.items.length) finish();
+        } catch (e) { finish(); }
+        running = null;
+        return !!tok;
+      })();
+      return running;
+    };
+
+    obs = new IntersectionObserver((entries) => {
+      if (my !== token_()) return finish();
+      if (entries.some((e) => e.isIntersecting)) c.loadMore();
     }, { root: view, rootMargin: '600px' });
     obs.observe(sentinel);
   }
   const token_ = () => token;
+
+  // Lecture aléatoire : on charge toute la liste, on la mélange, puis on la suit dans cet ordre.
+  const SHUFFLE_SVG = '<svg viewBox="0 0 24 24"><path d="M10.6 9.2 5.4 4 4 5.4l5.2 5.2zM14.5 4l2 2L4 18.6 5.4 20 18 7.5l2 2V4zm.3 9.4-1.4 1.4 3.1 3.1-2 2H20v-5.5l-2 2z"/></svg>';
+  function shuffleButton(getCtx, label = 'Aléatoire') {
+    const b = el('button', { class: 'btn ghost' }, label);
+    b.insertAdjacentHTML('afterbegin', SHUFFLE_SVG);
+    b.addEventListener('click', async () => {
+      const c = getCtx();
+      if (!c || b.disabled) return;
+      b.disabled = true;
+      b.classList.add('busy');
+      try {
+        if (c.loadMore) { let guard = 0; while (guard++ < 60 && (await c.loadMore())) { /* on charge tout */ } }
+      } catch (e) { /* on mélange ce qu'on a */ }
+      b.disabled = false;
+      b.classList.remove('busy');
+      const ids = c.ids.slice();
+      for (let i = ids.length - 1; i > 0; i--) {
+        const k = Math.floor(Math.random() * (i + 1));
+        [ids[i], ids[k]] = [ids[k], ids[i]];
+      }
+      if (!ids.length) return;
+      queue = { playlistId: c.playlistId, ids, i: 0, shuffled: true };
+      startPlay({ videoId: ids[0], playlistId: c.playlistId }, null, { keepQueue: true });
+    });
+    return b;
+  }
 
   // ---------- vues ----------
   async function render() {
@@ -212,7 +254,9 @@
         if (!items.length) return setView(bar, el('div', { class: 'msg' }, 'Rien ici pour le moment.'));
         const isSongs = tab === 'songs';
         ctx = isSongs ? { playlistId: data.header?.playlistId || 'LM', ids: items.filter((i) => i.kind === 'song').map((i) => i.videoId) } : { playlistId: '', ids: [] };
-        setView(bar, isSongs
+        const lc = ctx;
+        const tools = isSongs ? el('div', { style: 'margin:18px 0 6px' }, shuffleButton(() => lc)) : null;
+        setView(bar, tools, isSongs
           ? el('div', { class: 'cols2 list', style: 'margin-top:18px' }, items.map((i) => songRow(i, data.header?.playlistId || 'LM')))
           : el('div', { class: 'grid', style: 'margin-top:20px' }, items.map(card)));
         if (isSongs) autoMore(data.continuation, data.header?.playlistId || 'LM', '');
@@ -225,8 +269,10 @@
         const cover = el('div', { class: 'cover' }, img(h.thumb));
         const play = el('button', { class: 'btn', onclick: () => songs[0] ? playSong(songs[0], h.playlistId) : h.playlistId && startPlay({ playlistId: h.playlistId }) }, 'Lecture');
         play.insertAdjacentHTML('afterbegin', PLAY_SVG);
-        const hero = el('div', { class: 'hero' }, cover, el('div', {}, el('h1', {}, h.title || v.title || ''), el('div', { class: 'sub' }, h.subtitle), play));
-        ctx = { playlistId: h.playlistId, ids: songs.map((i) => i.videoId) };
+        const c = { playlistId: h.playlistId, ids: songs.map((i) => i.videoId) };
+        const shuffle = songs.length ? shuffleButton(() => c) : null;
+        const hero = el('div', { class: 'hero' }, cover, el('div', {}, el('h1', {}, h.title || v.title || ''), el('div', { class: 'sub' }, h.subtitle), el('div', { class: 'btns' }, play, shuffle)));
+        ctx = c;
         setView(hero, ...data.sections.map((s) => sectionNode(s, h.playlistId)));
         autoMore(data.continuation, h.playlistId, h.thumb);
       }
@@ -351,7 +397,17 @@
     const prevId = lastState.videoId;
     lastState = s;
     if (pending && isLoaded(s)) stopLoading();
-    if (queue && !pending && s.videoId) {
+    if (queue && queue.shuffled && !pending && s.videoId) {
+      // Fin de morceau : on passe nous-mêmes au suivant de l'ordre mélangé, un poil avant la fin
+      if (s.isPlaying && s.duration > 0 && s.duration - s.currentTime < 0.9 && queue.endFor !== s.videoId) {
+        queue.endFor = s.videoId;
+        nextTrack();
+      } else if (s.videoId !== queue.ids[queue.i] && queue.i + 1 < queue.ids.length) {
+        // YouTube Music a avancé de lui-même dans l'ordre normal : on reprend l'ordre mélangé
+        queue.i += 1;
+        startPlay({ videoId: queue.ids[queue.i], playlistId: queue.playlistId }, null, { keepQueue: true });
+      }
+    } else if (queue && !pending && s.videoId) {
       const idx = queue.ids.indexOf(s.videoId);
       if (idx >= 0) queue.i = idx;
       else if (s.playlistId && s.playlistId !== queue.playlistId && queue.i + 1 < queue.ids.length) {
@@ -380,8 +436,9 @@
       const r = s.duration > 0 ? s.currentTime / s.duration : 0;
       for (const id of ['seek', 'f-seekbar']) { $('#' + id).value = Math.round(r * 1000); setRange($('#' + id), r); }
       $('#t-cur').textContent = $('#f-cur').textContent = fmt(s.currentTime);
+      $('#t-dur').textContent = $('#f-dur').textContent = timeLeft(s.currentTime, s.duration);
     }
-    $('#t-dur').textContent = $('#f-dur').textContent = fmt(s.duration);
+    if (seeking) $('#t-dur').textContent = $('#f-dur').textContent = timeLeft(lastState.currentTime, s.duration);
     if (document.activeElement !== $('#vol')) { $('#vol').value = Math.round((s.volume ?? 1) * 100); setRange($('#vol'), s.volume ?? 1); }
 
     if (s.videoId !== prevId) {
@@ -396,6 +453,7 @@
       const r = inp.value / 1000;
       setRange(inp, r);
       $('#t-cur').textContent = $('#f-cur').textContent = fmt(r * (lastState.duration || 0));
+      $('#t-dur').textContent = $('#f-dur').textContent = timeLeft(r * (lastState.duration || 0), lastState.duration);
     });
     inp.addEventListener('change', () => {
       window.neo.cmd('seek', (inp.value / 1000) * (lastState.duration || 0));

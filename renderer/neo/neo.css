@@ -116,7 +116,8 @@ h2.sec { font-size: 22px; font-weight: 700; margin: 26px 0 14px; letter-spacing:
 .icon.huge:hover { background: var(--accent); border-radius: 37px; }
 .icon.huge svg { width: 34px; height: 34px; }
 .seek { display: flex; align-items: center; gap: 10px; width: 100%; max-width: 560px; font-size: 11.5px; color: var(--dim); font-variant-numeric: tabular-nums; }
-.seek span { width: 36px; text-align: center; }
+.seek span { width: 40px; text-align: center; white-space: nowrap; }
+.seek span:last-child { width: 96px; text-align: left; }
 .p-right { display: flex; align-items: center; justify-content: flex-end; gap: 8px; color: var(--dim); }
 .vol-ico { width: 20px; height: 20px; }
 
@@ -156,3 +157,10 @@ input[type=range]:hover::-webkit-slider-thumb { transform: scale(1); }
 .banner .bt { font-size: 17px; font-weight: 700; }
 .banner .bs { color: var(--dim); font-size: 13.5px; margin-top: 4px; }
 .banner .btn { flex-shrink: 0; }
+
+/* ---------- Bouton aléatoire ---------- */
+.btns { display: flex; gap: 10px; flex-wrap: wrap; }
+.btn.ghost { background: var(--surface-3); color: var(--text); }
+.btn.ghost:hover { filter: brightness(1.25); }
+.btn.busy { opacity: .6; cursor: progress; }
+.btn svg { width: 20px; height: 20px; }
