@@ -1,4 +1,4 @@
-const { app, BrowserWindow, WebContentsView, session, ipcMain, screen } = require('electron');
+const { app, BrowserWindow, WebContentsView, session, ipcMain, screen, shell } = require('electron');
 const path = require('path');
 const fs = require('fs');
 const os = require('os');
@@ -339,10 +339,17 @@ function attachSplash(win) {
 
 // ---------- Blocage des pubs sur la session YouTube Music ----------
 let adBlockInstalled = false;
+let loginWindow = null;
 function setupAdBlock(ytSession) {
   if (adBlockInstalled) return;
   adBlockInstalled = true;
   ytSession.webRequest.onBeforeRequest((details, callback) => {
+    // La fenêtre de connexion Google n'est jamais filtrée : on ne touche à rien de ce
+    // qu'elle charge, sinon Google peut juger la page "anormale".
+    if (loginWindow && !loginWindow.isDestroyed() && details.webContentsId === loginWindow.webContents.id) {
+      callback({ cancel: false });
+      return;
+    }
     if (!store.get('adBlockEnabled', true)) {
       callback({ cancel: false });
       return;
@@ -508,9 +515,9 @@ const neoApi = createApi(
   app.isPackaged ? null : path.join(__dirname, 'debug')
 );
 
-// Connexion Google : la fenêtre du moteur s'affiche sur la page de connexion, et
-// se referme toute seule dès que la connexion est réussie.
-let loginMode = false;
+// Connexion Google : une fenêtre dédiée, "propre" (aucun script injecté, aucun filtre),
+// qui partage la session de l'app. Elle se referme toute seule dès que la connexion
+// est réussie, puis le moteur recharge YouTube Music avec le compte connecté.
 const LOGIN_URL =
   'https://accounts.google.com/ServiceLogin?service=youtube&continue=' +
   encodeURIComponent('https://music.youtube.com/');
@@ -519,22 +526,128 @@ function notifyLogin() {
   if (mainWindow && !mainWindow.isDestroyed()) mainWindow.webContents.send('neo:login-done');
 }
 
-async function checkLoginDone(eng) {
-  if (!loginMode || eng.isDestroyed()) return;
-  const url = eng.webContents.getURL();
-  if (!isMusicUrl(url) && url !== MUSIC_ORIGIN) return;
+// Identité "Chrome" complète et cohérente : l'en-tête User-Agent, les indices client
+// (sec-ch-ua) et navigator.userAgentData disent tous la même chose. Google refuse
+// les navigateurs dont ces éléments se contredisent ou trahissent Electron.
+async function presentAsChrome(wc) {
+  const full = process.versions.chrome;
+  const major = full.split('.')[0];
+  const plat =
+    process.platform === 'darwin'
+      ? { ua: 'Macintosh; Intel Mac OS X 10_15_7', nav: 'MacIntel', name: 'macOS', ver: '14.0.0', arch: 'arm' }
+      : process.platform === 'linux'
+      ? { ua: 'X11; Linux x86_64', nav: 'Linux x86_64', name: 'Linux', ver: '6.0.0', arch: 'x86' }
+      : { ua: 'Windows NT 10.0; Win64; x64', nav: 'Win32', name: 'Windows', ver: '10.0.0', arch: 'x86' };
+  const ua = `Mozilla/5.0 (${plat.ua}) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/${major}.0.0.0 Safari/537.36`;
+  wc.setUserAgent(ua);
+  const loc = app.getLocale() || 'en-US';
+  const base = loc.split('-')[0];
   try {
-    const ok = await eng.webContents.executeJavaScript(
-      '!!(window.ytcfg && window.ytcfg.get && window.ytcfg.get("LOGGED_IN"))'
-    );
-    if (ok) {
-      loginMode = false;
-      eng.hide();
+    if (!wc.debugger.isAttached()) wc.debugger.attach('1.3');
+    await wc.debugger.sendCommand('Emulation.setUserAgentOverride', {
+      userAgent: ua,
+      acceptLanguage: base === loc ? loc : `${loc},${base}`,
+      platform: plat.nav,
+      userAgentMetadata: {
+        brands: [
+          { brand: 'Chromium', version: major },
+          { brand: 'Google Chrome', version: major },
+          { brand: 'Not/A)Brand', version: '8' },
+        ],
+        fullVersionList: [
+          { brand: 'Chromium', version: full },
+          { brand: 'Google Chrome', version: full },
+          { brand: 'Not/A)Brand', version: '8.0.0.0' },
+        ],
+        fullVersion: full,
+        platform: plat.name,
+        platformVersion: plat.ver,
+        architecture: plat.arch,
+        model: '',
+        mobile: false,
+        bitness: '64',
+        wow64: false,
+      },
+    });
+    await wc.debugger.sendCommand('Page.enable');
+    await wc.debugger.sendCommand('Page.addScriptToEvaluateOnNewDocument', {
+      source: "if (!window.chrome) { Object.defineProperty(window, 'chrome', { value: { app: { isInstalled: false }, runtime: {} }, configurable: true }); }",
+    });
+  } catch (e) {
+    // sans le débogueur on garde au moins le User-Agent propre
+  }
+}
+
+function openLogin() {
+  if (loginWindow && !loginWindow.isDestroyed()) {
+    loginWindow.show();
+    loginWindow.focus();
+    return;
+  }
+  const ytSession = session.fromPartition('persist:ytmusic-custom');
+  const w = new BrowserWindow({
+    width: 520,
+    height: 760,
+    parent: mainWindow && !mainWindow.isDestroyed() ? mainWindow : undefined,
+    title: 'Connexion à Google',
+    backgroundColor: '#202124',
+    icon: path.join(__dirname, 'build', 'icon.ico'),
+    autoHideMenuBar: true,
+    show: false,
+    webPreferences: { session: ytSession, sandbox: true, contextIsolation: true, nodeIntegration: false },
+  });
+  loginWindow = w;
+  const wc = w.webContents;
+  let finished = false;
+  let checking = false;
+
+  w.on('closed', () => {
+    loginWindow = null;
+  });
+  wc.setWindowOpenHandler(({ url }) => {
+    if (/^https?:\/\//i.test(url)) shell.openExternal(url);
+    return { action: 'deny' };
+  });
+
+  const finish = () => {
+    if (finished) return;
+    finished = true;
+    if (!w.isDestroyed()) w.close();
+    latestEngineState = null;
+    if (engineWindow && !engineWindow.isDestroyed()) {
+      engineWindow.webContents.once('did-finish-load', () => setTimeout(notifyLogin, 300));
+      engineWindow.webContents.loadURL(MUSIC_ORIGIN);
+    } else {
       notifyLogin();
     }
-  } catch (e) {
-    // page pas encore prête, on revérifiera au prochain chargement
-  }
+  };
+
+  // Connexion réussie = on est revenu sur YouTube Music ET le cookie de session existe.
+  const check = async () => {
+    if (finished || checking || w.isDestroyed()) return;
+    if (!isMusicUrl(wc.getURL())) return;
+    checking = true;
+    try {
+      for (let i = 0; i < 6 && !finished && !w.isDestroyed(); i++) {
+        const cookies = await ytSession.cookies.get({ name: 'SAPISID' });
+        if (cookies.length) return finish();
+        await new Promise((r) => setTimeout(r, 1000));
+      }
+    } catch (e) {
+      // on réessaiera à la prochaine navigation
+    } finally {
+      checking = false;
+    }
+  };
+  wc.on('did-navigate', check);
+  wc.on('did-finish-load', check);
+
+  presentAsChrome(wc).then(() => {
+    if (w.isDestroyed()) return;
+    wc.loadURL(LOGIN_URL);
+    w.show();
+    w.focus();
+  });
 }
 
 function createEngineWindow(ytSession) {
@@ -576,20 +689,17 @@ function createEngineWindow(ytSession) {
   eng.webContents.on('did-finish-load', () => {
     engineLoadedOnce = true;
     const read = (...p) => fs.readFileSync(path.join(__dirname, ...p), 'utf8');
+    // Jamais de script injecté ailleurs que sur YouTube Music (surtout pas sur une page Google).
+    if (!isMusicUrl(eng.webContents.getURL())) return;
     eng.webContents.executeJavaScript(read('renderer', 'inject.js')).catch(() => {});
     eng.webContents.executeJavaScript(read('renderer', 'neo', 'engine.js')).catch(() => {});
-    checkLoginDone(eng);
   });
 
-  // La croix de la fenêtre de connexion la cache seulement : la lecture continue.
+  // La croix de cette fenêtre la cache seulement : la lecture continue.
   eng.on('close', (e) => {
     if (!appQuitting) {
       e.preventDefault();
       eng.hide();
-      if (loginMode) {
-        loginMode = false;
-        notifyLogin();
-      }
     }
   });
   eng.on('closed', () => {
@@ -742,15 +852,7 @@ ipcMain.on('neo:cmd', (e, name, arg) => {
     .executeJavaScript(`window.__neo && window.__neo.${name}(${a})`)
     .catch(() => {});
 });
-ipcMain.on('neo:login', () => {
-  if (!engineWindow || engineWindow.isDestroyed()) return;
-  loginMode = true;
-  engineWindow.loadURL(LOGIN_URL);
-  engineWindow.setSize(1000, 720);
-  engineWindow.center();
-  engineWindow.show();
-  engineWindow.focus();
-});
+ipcMain.on('neo:login', () => openLogin());
 ipcMain.on('engine:state', (event, state) => {
   if (!engineWindow || event.sender !== engineWindow.webContents) return;
   latestEngineState = state;
