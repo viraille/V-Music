@@ -720,6 +720,17 @@ ipcMain.handle('neo:more', (e, token, kind) => neoApi.more(String(token || ''), 
 ipcMain.handle('neo:service', (e, spec) => neoApi.service(spec));
 ipcMain.handle('neo:playlistsFor', (e, videoId) => neoApi.playlistsFor(String(videoId || '')));
 ipcMain.handle('neo:addToPlaylist', (e, playlistId, videoId) => neoApi.addToPlaylist(String(playlistId || ''), String(videoId || '')));
+ipcMain.handle('neo:account', () => neoApi.account());
+ipcMain.handle('neo:logout', async () => {
+  // Déconnexion : on efface les cookies de connexion de cette appli (pas ceux de ton navigateur)
+  const ses = session.fromPartition('persist:ytmusic-custom');
+  await ses.clearStorageData({ storages: ['cookies'] });
+  try { await ses.cookies.flushStore(); } catch (e) {}
+  latestEngineState = null;
+  if (engineWindow && !engineWindow.isDestroyed()) engineWindow.webContents.loadURL(MUSIC_ORIGIN);
+  notifyLogin();
+  return true;
+});
 ipcMain.handle('neo:library', (e, kind) => neoApi.library(String(kind || '')));
 ipcMain.handle('neo:getState', () => latestEngineState);
 ipcMain.on('neo:play', (e, target) => neoPlay(target));

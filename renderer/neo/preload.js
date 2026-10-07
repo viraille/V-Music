@@ -8,6 +8,8 @@ contextBridge.exposeInMainWorld('neo', {
   service: (spec) => ipcRenderer.invoke('neo:service', spec),
   playlistsFor: (videoId) => ipcRenderer.invoke('neo:playlistsFor', videoId),
   addToPlaylist: (playlistId, videoId) => ipcRenderer.invoke('neo:addToPlaylist', playlistId, videoId),
+  account: () => ipcRenderer.invoke('neo:account'),
+  logout: () => ipcRenderer.invoke('neo:logout'),
   library: (kind) => ipcRenderer.invoke('neo:library', kind),
   play: (target) => ipcRenderer.send('neo:play', target),
   cmd: (name, arg) => ipcRenderer.send('neo:cmd', name, arg),

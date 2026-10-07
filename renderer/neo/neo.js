@@ -59,7 +59,7 @@
   );
   $('#btn-settings').addEventListener('click', () => window.neo.openSettings());
   $('#login').addEventListener('click', () => window.neo.login());
-  window.neo.onLogin(() => { render(); });
+  window.neo.onLogin(() => { refreshAccount(); render(); });
   const loginBanner = () => {
     const b = el('div', { class: 'banner' },
       el('div', {}, el('div', { class: 'bt' }, 'Connecte-toi à ton compte Google'),
@@ -386,9 +386,49 @@
     m.style.left = left + 'px';
     m.style.top = top + 'px';
   }
-  document.addEventListener('mousedown', (e) => { if (!$('#menu').hidden && !e.target.closest('#menu') && !e.target.closest('.more')) closeMenu(); });
+  document.addEventListener('mousedown', (e) => { if (!$('#menu').hidden && !e.target.closest('#menu') && !e.target.closest('.more') && !e.target.closest('#account')) closeMenu(); });
   view.addEventListener('scroll', closeMenu);
   window.addEventListener('resize', closeMenu);
+
+  // ---------- Compte (photo de profil + connexion / déconnexion) ----------
+  let account = { loggedIn: false };
+  function paintAvatar() {
+    const b = $('#account');
+    b.querySelectorAll('img').forEach((n) => n.remove());
+    b.querySelector('.av-none').style.display = 'block';
+    if (account.loggedIn && account.photo) {
+      const im = el('img', { alt: account.name || 'Compte', referrerpolicy: 'no-referrer' });
+      im.addEventListener('load', () => { b.querySelector('.av-none').style.display = 'none'; });
+      im.addEventListener('error', () => im.remove());
+      im.src = account.photo;
+      b.append(im);
+    }
+    b.title = account.loggedIn ? (account.name || 'Compte connecté') : 'Se connecter';
+  }
+  async function refreshAccount() {
+    try { account = (await window.neo.account()) || { loggedIn: false }; } catch (e) { account = { loggedIn: false }; }
+    paintAvatar();
+    $('#login').hidden = account.loggedIn;
+  }
+  $('#account').addEventListener('click', (e) => {
+    e.stopPropagation();
+    const m = $('#menu');
+    const rows = [];
+    if (account.loggedIn) {
+      rows.push(el('div', { class: 'mh' }, el('div', { class: 'n' }, account.name || 'Compte connecté'), account.handle ? el('div', { class: 's' }, account.handle) : null));
+      rows.push(el('button', { class: 'mi danger', onclick: async () => {
+        closeMenu();
+        try { await window.neo.logout(); toast('Déconnecté'); } catch (err) { toast('Déconnexion impossible'); }
+      } }, 'Se déconnecter'));
+    } else {
+      rows.push(el('button', { class: 'mi', onclick: () => { closeMenu(); window.neo.login(); } }, 'Se connecter'));
+    }
+    m.replaceChildren(...rows.filter(Boolean));
+    m.hidden = false;
+    const r = $('#account').getBoundingClientRect();
+    m.style.left = Math.min(r.right + 10, innerWidth - m.offsetWidth - 8) + 'px';
+    m.style.top = Math.max(8, r.top) + 'px';
+  });
 
   // ---------- vues ----------
   async function render() {
@@ -681,6 +721,7 @@
   });
 
   window.addEventListener('focus', () => { if (!$('#login').hidden && current.name === 'home') render(); });
+  refreshAccount();
   window.neo.onState(onState);
   window.neo.getState().then((s) => s && onState(s));
   render();

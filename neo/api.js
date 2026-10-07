@@ -24,7 +24,7 @@ function dump(debugDir, name, data) {
 
 const ALLOWED = new Set([
   'browse', 'search', 'like/like', 'like/dislike', 'like/removelike',
-  'browse/edit_playlist', 'feedback', 'playlist/get_add_to_playlist',
+  'browse/edit_playlist', 'feedback', 'playlist/get_add_to_playlist', 'account/account_menu',
 ]);
 const ID = /^[\w-]{3,80}$/;
 
@@ -145,6 +145,27 @@ function createApi(getEngine, waitLoaded, debugDir) {
       });
       if (j.status && j.status !== 'STATUS_SUCCEEDED') throw new Error('refusé par YouTube Music');
       return true;
+    },
+    // Compte connecté : nom + photo de profil
+    async account() {
+      let j;
+      try { j = await call('account/account_menu', {}); } catch (e) { return { loggedIn: false }; }
+      if (!j.__loggedIn) return { loggedIn: false };
+      let h = null;
+      (function walk(n, d) {
+        if (h || !n || typeof n !== 'object' || d > 40) return;
+        if (n.activeAccountHeaderRenderer) { h = n.activeAccountHeaderRenderer; return; }
+        for (const v of Object.values(n)) walk(v, d + 1);
+      })(j, 0);
+      if (!h) return { loggedIn: true, name: '', photo: '' };
+      const { text } = require('./parse');
+      const th = h.accountPhoto && h.accountPhoto.thumbnails;
+      return {
+        loggedIn: true,
+        name: text(h.accountName),
+        handle: text(h.channelHandle) || text(h.email) || '',
+        photo: Array.isArray(th) && th.length ? th[th.length - 1].url : '',
+      };
     },
     async library(kind) {
       const ids = {
