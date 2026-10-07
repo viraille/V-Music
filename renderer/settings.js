@@ -15,6 +15,7 @@ async function refreshOverlayUrl() {
 
 async function load() {
   const settings = await ipcRenderer.invoke('settings:get');
+  document.getElementById('uiMode').value = settings.uiMode === 'neo' ? 'neo' : 'classic';
   document.getElementById('adBlock').checked = settings.adBlockEnabled;
   document.getElementById('animations').checked = settings.animationsEnabled;
   document.getElementById('splash').checked = settings.splashEnabled !== false;
@@ -28,6 +29,10 @@ async function load() {
   toggleOverlayUrlRow(settings.overlayEnabled);
   if (settings.overlayEnabled) await refreshOverlayUrl();
 }
+
+document.getElementById('uiMode').addEventListener('change', (e) => {
+  ipcRenderer.send('settings:set', 'uiMode', e.target.value);
+});
 
 document.getElementById('adBlock').addEventListener('change', (e) => {
   ipcRenderer.send('settings:set', 'adBlockEnabled', e.target.checked);

@@ -8,6 +8,7 @@ A custom Electron desktop client for [YouTube Music](https://music.youtube.com),
 - 🎨 **Restyled UI** — custom CSS with smooth animations (toggleable)
 - 🦈 **Launch animation** — a short shark animation shown inside the app while YouTube Music loads (toggleable)
 - 📊 **Taskbar progress bar** — current track progress shown directly on the Windows taskbar icon
+- 🆕 **New interface (beta)** — an optional, fully custom UI (home, search, library, full-screen player with colours taken from the album art). Playback runs through a hidden YouTube Music page, so sign-in and ad blocking work the same. Switch in Settings → Interface
 - 🪟 **No more stuck-open window** — fixes the native "leave site?" prompt that used to block the app from closing while music was playing
 - 🖥️ **OBS overlay** — a local Browser Source URL that shows the current track (artwork, title, artist, progress) live in your stream
 - 👥 **Listening dashboard** (optional) — see what track each instance of the app is playing in real time, via [Supabase](https://supabase.com). **Enabled by default** and togglable anytime in Settings. When on, it sends only: a display name (defaults to your Windows username, editable in Settings), a random per-install client ID, the current track title/artist, and play/pause state — nothing tied to your Google account
@@ -41,7 +42,9 @@ Outputs an installer and a portable `.exe` to `release/`.
 ```
 main.js              Electron main process: windows, ad block, settings, overlay server, dashboard reporting
 preload.js            Bridge exposed to the renderer (settings, progress, reporting)
+neo/                  New interface: YouTube Music data access + parsing
 renderer/
+  neo/                  New interface UI (HTML/CSS/JS)
   inject.js           Injected into music.youtube.com: playback detection, UI hooks
   base.css             Base restyle
   animations.css        Optional animation layer

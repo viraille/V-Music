@@ -23,6 +23,7 @@ const store = new Store({
     reportingUsername: os.userInfo().username,
     reportingClientId: null,
     splashEnabled: true,
+    uiMode: 'classic', // 'classic' (site YouTube Music restylé) ou 'neo' (interface maison)
     windowBounds: null,
     windowMaximized: false,
     lastUrl: null,
@@ -228,7 +229,7 @@ function openSettingsWindow() {
   }
   settingsWindow = new BrowserWindow({
     width: 380,
-    height: 530,
+    height: 590,
     resizable: false,
     title: 'Paramètres',
     icon: path.join(__dirname, 'build', 'icon.ico'),
@@ -336,13 +337,11 @@ function attachSplash(win) {
   return remove;
 }
 
-// ---------- Fenêtre principale ----------
-function createWindow() {
-  const useSplash = store.get('splashEnabled', true);
-  const splashStartedAt = Date.now();
-
-  const ytSession = session.fromPartition('persist:ytmusic-custom');
-
+// ---------- Blocage des pubs sur la session YouTube Music ----------
+let adBlockInstalled = false;
+function setupAdBlock(ytSession) {
+  if (adBlockInstalled) return;
+  adBlockInstalled = true;
   ytSession.webRequest.onBeforeRequest((details, callback) => {
     if (!store.get('adBlockEnabled', true)) {
       callback({ cancel: false });
@@ -371,6 +370,16 @@ function createWindow() {
     }
     respond({ cancel: false });
   });
+}
+
+// ---------- Fenêtre principale ----------
+function createWindow() {
+  const useSplash = store.get('splashEnabled', true);
+  const splashStartedAt = Date.now();
+
+  const ytSession = session.fromPartition('persist:ytmusic-custom');
+
+  setupAdBlock(ytSession);
 
   const savedBounds = getRestorableBounds();
 
@@ -467,6 +476,207 @@ function createWindow() {
   return win;
 }
 
+
+// ---------- Nouvelle interface ("neo") ----------
+// La fenêtre affiche notre propre interface (renderer/neo). Le son vient d'une
+// page YouTube Music cachée, le "moteur" : même session connectée, même
+// blocage de pub. L'interface lui envoie des commandes et lit son état.
+const { createApi } = require('./neo/api');
+let engineWindow = null;
+let engineLoadedOnce = false;
+let latestEngineState = null;
+let appQuitting = false;
+
+function engineLoaded(timeout = 20000) {
+  return new Promise((resolve) => {
+    const wc = engineWindow && !engineWindow.isDestroyed() ? engineWindow.webContents : null;
+    if (!wc) return resolve();
+    if (engineLoadedOnce && !wc.isLoading()) return resolve();
+    const done = () => {
+      clearTimeout(timer);
+      wc.removeListener('did-finish-load', done);
+      resolve();
+    };
+    const timer = setTimeout(done, timeout);
+    wc.once('did-finish-load', done);
+  });
+}
+
+const neoApi = createApi(
+  () => (engineWindow && !engineWindow.isDestroyed() ? engineWindow.webContents : null),
+  engineLoaded
+);
+
+function createEngineWindow(ytSession) {
+  const eng = new BrowserWindow({
+    width: 1000,
+    height: 720,
+    show: false,
+    title: 'YouTube Music (moteur)',
+    backgroundColor: '#0b0b0f',
+    icon: path.join(__dirname, 'build', 'icon.ico'),
+    autoHideMenuBar: true,
+    webPreferences: {
+      session: ytSession,
+      preload: path.join(__dirname, 'preload.js'),
+      contextIsolation: false,
+      nodeIntegration: false,
+      backgroundThrottling: false, // la lecture ne doit jamais ralentir en arrière-plan
+    },
+  });
+  engineWindow = eng;
+
+  const lastUrl = store.get('lastUrl');
+  eng.loadURL(isMusicUrl(lastUrl) ? lastUrl : MUSIC_ORIGIN);
+
+  const rememberUrl = (event, url, isMainFrame) => {
+    if (isMainFrame === false) return;
+    if (isMusicUrl(url)) store.set('lastUrl', url);
+  };
+  eng.webContents.on('did-navigate', rememberUrl);
+  eng.webContents.on('did-navigate-in-page', rememberUrl);
+  eng.webContents.on('will-prevent-unload', (event) => event.preventDefault());
+
+  eng.webContents.on('did-finish-load', () => {
+    engineLoadedOnce = true;
+    const read = (...p) => fs.readFileSync(path.join(__dirname, ...p), 'utf8');
+    eng.webContents.executeJavaScript(read('renderer', 'inject.js')).catch(() => {});
+    eng.webContents.executeJavaScript(read('renderer', 'neo', 'engine.js')).catch(() => {});
+  });
+
+  // La croix de la fenêtre de connexion la cache seulement : la lecture continue.
+  eng.on('close', (e) => {
+    if (!appQuitting) {
+      e.preventDefault();
+      eng.hide();
+    }
+  });
+  eng.on('closed', () => {
+    engineWindow = null;
+  });
+  return eng;
+}
+
+function createNeoWindow() {
+  const useSplash = store.get('splashEnabled', true);
+  const startedAt = Date.now();
+  const ytSession = session.fromPartition('persist:ytmusic-custom');
+  setupAdBlock(ytSession);
+
+  const savedBounds = getRestorableBounds();
+  const win = new BrowserWindow({
+    width: 1180,
+    height: 760,
+    minWidth: 760,
+    minHeight: 520,
+    ...(savedBounds || {}),
+    backgroundColor: '#111116',
+    icon: path.join(__dirname, 'build', 'icon.ico'),
+    autoHideMenuBar: true,
+    webPreferences: {
+      preload: path.join(__dirname, 'renderer', 'neo', 'preload.js'),
+      contextIsolation: true,
+      nodeIntegration: false,
+    },
+  });
+  mainWindow = win;
+  if (store.get('windowMaximized', false)) win.maximize();
+
+  let boundsTimer = null;
+  const scheduleSaveBounds = () => {
+    clearTimeout(boundsTimer);
+    boundsTimer = setTimeout(() => saveWindowBounds(win), 500);
+  };
+  win.on('resize', scheduleSaveBounds);
+  win.on('move', scheduleSaveBounds);
+  win.on('maximize', scheduleSaveBounds);
+  win.on('unmaximize', scheduleSaveBounds);
+  win.on('close', () => {
+    clearTimeout(boundsTimer);
+    saveWindowBounds(win);
+  });
+
+  // Liens externes : dans le navigateur, jamais dans notre fenêtre
+  win.webContents.setWindowOpenHandler(({ url }) => {
+    if (/^https:\/\//.test(url)) require('electron').shell.openExternal(url);
+    return { action: 'deny' };
+  });
+  win.webContents.on('will-navigate', (e) => e.preventDefault());
+
+  if (useSplash) {
+    const removeSplash = attachSplash(win);
+    win.webContents.once('did-finish-load', () => {
+      setTimeout(removeSplash, Math.max(0, SPLASH_MIN_MS - (Date.now() - startedAt)));
+    });
+    setTimeout(removeSplash, SPLASH_MAX_MS);
+  }
+
+  createEngineWindow(ytSession);
+  win.loadFile(path.join(__dirname, 'renderer', 'neo', 'index.html'));
+
+  win.on('closed', () => {
+    mainWindow = null;
+    appQuitting = true;
+    if (engineWindow && !engineWindow.isDestroyed()) engineWindow.destroy();
+  });
+  return win;
+}
+
+function neoPlay(target) {
+  if (!engineWindow || engineWindow.isDestroyed() || !target) return;
+  const videoId = /^[\w-]{6,20}$/.test(target.videoId || '') ? target.videoId : '';
+  const playlistId = /^[\w-]{5,80}$/.test(target.playlistId || '') ? target.playlistId : '';
+  if (!videoId && !playlistId) return;
+  const wc = engineWindow.webContents;
+  const url = videoId
+    ? `${MUSIC_ORIGIN}/watch?v=${videoId}${playlistId ? `&list=${playlistId}` : ''}`
+    : `${MUSIC_ORIGIN}/watch?list=${playlistId}`;
+  const hardLoad = () => {
+    if (!engineWindow || engineWindow.isDestroyed()) return;
+    engineWindow.webContents.loadURL(url);
+  };
+  if (!videoId) return hardLoad();
+  // D'abord un changement "en place" (instantané). On vérifie que ça a marché, sinon on recharge.
+  wc.executeJavaScript(
+    `window.__neo ? window.__neo.open(${JSON.stringify(videoId)}, ${JSON.stringify(playlistId)}) : false`
+  )
+    .then((ok) => {
+      if (!ok) return hardLoad();
+      setTimeout(() => {
+        if (!latestEngineState || latestEngineState.videoId !== videoId) hardLoad();
+      }, 3000);
+    })
+    .catch(hardLoad);
+}
+
+const NEO_COMMANDS = new Set(['toggle', 'play', 'pause', 'next', 'prev', 'seek', 'volume']);
+
+ipcMain.handle('neo:home', () => neoApi.home());
+ipcMain.handle('neo:search', (e, q) => neoApi.search(String(q || '').slice(0, 200)));
+ipcMain.handle('neo:browse', (e, id) => neoApi.browse(String(id || '')));
+ipcMain.handle('neo:library', (e, kind) => neoApi.library(String(kind || '')));
+ipcMain.handle('neo:getState', () => latestEngineState);
+ipcMain.on('neo:play', (e, target) => neoPlay(target));
+ipcMain.on('neo:cmd', (e, name, arg) => {
+  if (!NEO_COMMANDS.has(name) || !engineWindow || engineWindow.isDestroyed()) return;
+  const a = typeof arg === 'number' && Number.isFinite(arg) ? String(arg) : '';
+  engineWindow.webContents
+    .executeJavaScript(`window.__neo && window.__neo.${name}(${a})`)
+    .catch(() => {});
+});
+ipcMain.on('neo:login', () => {
+  if (!engineWindow || engineWindow.isDestroyed()) return;
+  engineWindow.setSize(1000, 720);
+  engineWindow.center();
+  engineWindow.show();
+  engineWindow.focus();
+});
+ipcMain.on('engine:state', (event, state) => {
+  if (!engineWindow || event.sender !== engineWindow.webContents) return;
+  latestEngineState = state;
+  if (mainWindow && !mainWindow.isDestroyed()) mainWindow.webContents.send('neo:state', state);
+});
+
 // ---------- IPC ----------
 ipcMain.handle('settings:get', () => store.store);
 
@@ -524,12 +734,16 @@ app.whenReady().then(() => {
   // Sans await : la fenêtre s'ouvre tout de suite, les listes s'activent dès
   // qu'elles sont prêtes.
   initListBlocker();
-  createWindow();
+  if (store.get('uiMode', 'classic') === 'neo') createNeoWindow();
+  else createWindow();
   if (store.get('overlayEnabled', false)) startOverlayServer();
   setInterval(flushPlayback, 5000);
 
   app.on('activate', () => {
-    if (BrowserWindow.getAllWindows().length === 0) createWindow();
+    if (BrowserWindow.getAllWindows().length === 0) {
+      if (store.get('uiMode', 'classic') === 'neo') createNeoWindow();
+      else createWindow();
+    }
   });
 });
 
@@ -538,6 +752,7 @@ app.on('window-all-closed', () => {
 });
 
 app.on('before-quit', () => {
+  appQuitting = true;
   flushPlayback();
   if (mainWindow && !mainWindow.isDestroyed()) mainWindow.setProgressBar(-1);
   stopOverlayServer();

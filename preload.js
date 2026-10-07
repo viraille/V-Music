@@ -22,6 +22,9 @@ window.__ytmcSendReport = (state) => ipcRenderer.send('report:send', state);
 window.__ytmcSavePlayback = (state) => ipcRenderer.send('playback:save', state);
 window.__ytmcGetResume = () => ipcRenderer.invoke('playback:getResume');
 
+// Nouvelle interface : le moteur caché publie son état de lecture.
+window.__ytmcEngineState = (state) => ipcRenderer.send('engine:state', state);
+
 (function () {
   // Clés connues utilisées par YouTube pour décrire les pubs à jouer dans
   // la réponse JSON du lecteur. On les supprime récursivement.
