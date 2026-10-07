@@ -5,6 +5,7 @@ const os = require('os');
 const crypto = require('crypto');
 const http = require('http');
 const Store = require('electron-store');
+const browserLogin = require('./neo/browser-login');
 
 // Dashboard : table Supabase "listening_status", pas de serveur perso à
 // exposer. La clé ici est la clé publique "publishable" (sb_publishable_...),
@@ -585,7 +586,56 @@ async function presentAsChrome(wc) {
   }
 }
 
+// Après une connexion réussie : le moteur recharge YouTube Music avec le compte connecté,
+// puis l'interface rafraîchit la photo de profil et les listes.
+function afterLogin() {
+  latestEngineState = null;
+  if (engineWindow && !engineWindow.isDestroyed()) {
+    engineWindow.webContents.once('did-finish-load', () => setTimeout(notifyLogin, 300));
+    engineWindow.webContents.loadURL(MUSIC_ORIGIN);
+  } else {
+    notifyLogin();
+  }
+}
+
+// Méthode principale : Google accepte la connexion dans Edge / Chrome (pas dans une appli
+// Electron). On y ouvre la page de connexion, puis on récupère la session.
+let loginBusy = false;
+async function importGoogleCookies(cookies) {
+  const ses = session.fromPartition('persist:ytmusic-custom');
+  const list = cookies.map((c) => browserLogin.toElectronCookie(c)).filter(Boolean);
+  await Promise.all(list.map((c) => ses.cookies.set(c).catch(() => {})));
+  try {
+    await ses.cookies.flushStore();
+  } catch (e) {}
+  return list.length;
+}
+
 function openLogin() {
+  if (loginBusy) return;
+  const exe = browserLogin.findBrowser();
+  if (!exe) {
+    openEmbeddedLogin();
+    return;
+  }
+  loginBusy = true;
+  browserLogin
+    .runExternalLogin({ exe, url: LOGIN_URL })
+    .then(async (cookies) => {
+      const n = await importGoogleCookies(cookies);
+      if (n) afterLogin();
+    })
+    .catch((e) => {
+      // Fenêtre fermée / délai dépassé : rien à faire. Navigateur inutilisable : secours.
+      if (e && e.code === 'launch') openEmbeddedLogin();
+    })
+    .finally(() => {
+      loginBusy = false;
+    });
+}
+
+// Secours (aucun Edge/Chrome trouvé) : fenêtre intégrée, que Google peut refuser.
+function openEmbeddedLogin() {
   if (loginWindow && !loginWindow.isDestroyed()) {
     loginWindow.show();
     loginWindow.focus();
@@ -619,13 +669,7 @@ function openLogin() {
     if (finished) return;
     finished = true;
     if (!w.isDestroyed()) w.close();
-    latestEngineState = null;
-    if (engineWindow && !engineWindow.isDestroyed()) {
-      engineWindow.webContents.once('did-finish-load', () => setTimeout(notifyLogin, 300));
-      engineWindow.webContents.loadURL(MUSIC_ORIGIN);
-    } else {
-      notifyLogin();
-    }
+    afterLogin();
   };
 
   // Connexion réussie = on est revenu sur YouTube Music ET le cookie de session existe.
@@ -688,6 +732,22 @@ function createEngineWindow(ytSession) {
     if (isMainFrame === false) return;
     if (isMusicUrl(url)) store.set('lastUrl', url);
   };
+  // Sans cookies (après une déconnexion, ou au premier lancement), YouTube peut afficher sa
+  // page de consentement : on montre alors la fenêtre du moteur pour que tu puisses répondre,
+  // puis elle se cache toute seule dès qu'on est revenu sur YouTube Music.
+  let consentShown = false;
+  eng.webContents.on('did-navigate', (event, url) => {
+    if (/^https:\/\/consent\.(youtube|google)\.com\//.test(url)) {
+      consentShown = true;
+      eng.setTitle('YouTube Music : consentement');
+      eng.setSize(1000, 720);
+      eng.center();
+      eng.show();
+    } else if (consentShown && isMusicUrl(url)) {
+      consentShown = false;
+      eng.hide();
+    }
+  });
   eng.webContents.on('did-navigate', rememberUrl);
   eng.webContents.on('did-navigate-in-page', rememberUrl);
   eng.webContents.on('will-prevent-unload', (event) => event.preventDefault());
@@ -926,6 +986,7 @@ app.whenReady().then(() => {
   // Sans await : la fenêtre s'ouvre tout de suite, les listes s'activent dès
   // qu'elles sont prêtes.
   initListBlocker();
+  browserLogin.cleanupOldProfiles(); // profils temporaires de connexion oubliés (cookies)
   if (store.get('uiMode', 'neo') === 'neo') createNeoWindow();
   else createWindow();
   if (store.get('overlayEnabled', false)) startOverlayServer();
