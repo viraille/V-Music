@@ -80,7 +80,11 @@
   // ---------- éléments d'interface ----------
   function open(item) {
     if (item.kind === 'song') return playSong(item);
-    if (item.browseId) return go({ name: 'detail', browseId: item.browseId, title: item.title, from: current.from || current.name });
+    let id = item.browseId;
+    // Playlists automatiques (« Musique J'aime »...) : pas d'identifiant de page, on le déduit
+    const pid = item.play && item.play.playlistId;
+    if (!id && pid && !/^RD/.test(pid)) id = 'VL' + pid;
+    if (id) return go({ name: 'detail', browseId: id, title: item.title, from: current.from || current.name });
     if (item.play) startPlay(item.play, item);
   }
   function playSong(item, playlistId) {
@@ -108,12 +112,20 @@
     return row;
   }
 
+  function listRow(item, playlistId) {
+    if (item.kind === 'song') return songRow(item, playlistId);
+    return el('button', { class: 'song', onclick: () => open(item) },
+      el('div', { class: 'thumb', style: item.kind === 'artist' ? 'border-radius:50%' : null }, img(item.thumb)),
+      el('div', { class: 'meta' }, el('div', { class: 't' }, item.title), el('div', { class: 's' }, item.subtitle)),
+      el('div', { class: 'd' }, ''));
+  }
+
   function sectionNode(sec, playlistId) {
     const songs = sec.items.filter((i) => i.kind === 'song');
     const wrap = el('div');
     if (sec.title) wrap.append(el('h2', { class: 'sec' }, sec.title));
     if (songs.length && songs.length >= sec.items.length / 2) {
-      wrap.append(el('div', { class: 'cols2 list' }, sec.items.map((i) => (i.kind === 'song' ? songRow(i, playlistId) : card(i)))));
+      wrap.append(el('div', { class: 'cols2 list' }, sec.items.map((i) => listRow(i, playlistId))));
     } else if (sec.items.length > 8) {
       wrap.append(el('div', { class: 'grid' }, sec.items.map(card)));
     } else {
@@ -251,13 +263,14 @@
     syncButtons();
   }
 
-  function startPlay(target, meta) {
+  async function startPlay(target, meta) {
     clearTimeout(pending && pending.timer);
-    pending = {
+    const mine = {
       videoId: (target && target.videoId) || '',
       fromVideoId: lastState.videoId || '',
-      timer: setTimeout(stopLoading, 25000), // sécurité : on n'affiche jamais le rond indéfiniment
+      timer: setTimeout(() => { if (pending === mine) stopLoading(); }, 15000), // jamais de rond infini
     };
+    pending = mine;
     if (meta && meta.title) {
       $('#player').classList.remove('empty');
       $('#p-title').textContent = meta.title;
@@ -265,11 +278,24 @@
       if (meta.thumb) $('#p-img').src = meta.thumb;
     }
     syncButtons();
+    // Playlist sans morceau précisé : on cherche son premier titre (lancer une playlist
+    // « à vide » ne démarre pas toujours la lecture).
+    if (target && !target.videoId && target.playlistId && !/^RD/.test(target.playlistId)) {
+      try {
+        const d = await window.neo.browse('VL' + target.playlistId);
+        const first = d.sections.flatMap((s) => s.items).find((i) => i.kind === 'song' && i.videoId);
+        if (first) {
+          target = { videoId: first.videoId, playlistId: target.playlistId };
+          mine.videoId = first.videoId;
+        }
+      } catch (e) { /* on tente quand même avec la playlist seule */ }
+      if (pending !== mine) return; // l'utilisateur a cliqué sur autre chose entre-temps
+    }
     window.neo.play(target);
   }
 
   function isLoaded(s) {
-    if (!s.isPlaying || !(s.duration > 0)) return false;
+    if (!s.isPlaying || !(s.duration > 0) || !(s.currentTime > 0)) return false;
     return pending.videoId ? s.videoId === pending.videoId : s.videoId !== pending.fromVideoId;
   }
 
