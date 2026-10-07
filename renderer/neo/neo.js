@@ -110,25 +110,41 @@
       fab.addEventListener('click', (e) => { e.stopPropagation(); startPlay(item.play, item); });
       art.append(fab);
     }
-    return el('button', { class: `card ${item.kind}`, onclick: () => open(item) }, art,
+    const c = el('div', { class: `card ${item.kind}`, role: 'button', tabindex: '0', onclick: () => open(item) }, art,
       el('div', { class: 't' }, item.title), el('div', { class: 's' }, item.subtitle));
+    c.addEventListener('keydown', (e) => { if (e.key === 'Enter') open(item); });
+    if (item.menu && item.menu.length) c.append(moreButton(item, null));
+    return c;
+  }
+
+  const MORE_SVG = '<svg viewBox="0 0 24 24"><path d="M12 8a2 2 0 1 0 0-4 2 2 0 0 0 0 4zm0 2a2 2 0 1 0 0 4 2 2 0 0 0 0-4zm0 6a2 2 0 1 0 0 4 2 2 0 0 0 0-4z"/></svg>';
+  function moreButton(item, row) {
+    const b = el('button', { class: 'more', title: 'Plus d\'options' });
+    b.innerHTML = MORE_SVG;
+    b.addEventListener('click', (e) => { e.stopPropagation(); openMenu(item, b, row); });
+    return b;
   }
 
   function songRow(item, playlistId) {
-    const row = el('button', { class: 'song', 'data-vid': item.videoId || '', onclick: () => playSong(item, playlistId) },
+    const row = el('div', { class: 'song', role: 'button', tabindex: '0', 'data-vid': item.videoId || '', onclick: () => playSong(item, playlistId) },
       el('div', { class: 'thumb' }, img(item.thumb)),
       el('div', { class: 'meta' }, el('div', { class: 't' }, item.title), el('div', { class: 's' }, item.subtitle)),
       el('div', { class: 'd' }, item.duration || ''));
+    row.addEventListener('keydown', (e) => { if (e.key === 'Enter') playSong(item, playlistId); });
+    if (item.menu && item.menu.length || item.videoId) row.append(moreButton(item, row));
     if (item.videoId && item.videoId === lastState.videoId) row.classList.add('now');
     return row;
   }
 
   function listRow(item, playlistId) {
     if (item.kind === 'song') return songRow(item, playlistId);
-    return el('button', { class: 'song', onclick: () => open(item) },
+    const row = el('div', { class: 'song', role: 'button', tabindex: '0', onclick: () => open(item) },
       el('div', { class: 'thumb', style: item.kind === 'artist' ? 'border-radius:50%' : null }, img(item.thumb)),
       el('div', { class: 'meta' }, el('div', { class: 't' }, item.title), el('div', { class: 's' }, item.subtitle)),
       el('div', { class: 'd' }, ''));
+    row.addEventListener('keydown', (e) => { if (e.key === 'Enter') open(item); });
+    if (item.menu && item.menu.length) row.append(moreButton(item, row));
+    return row;
   }
 
   function sectionNode(sec, playlistId) {
@@ -217,6 +233,162 @@
     });
     return b;
   }
+
+
+  // ---------- J'aime ----------
+  const likeOv = {}; // videoId -> statut choisi ici (pour l'affichage immédiat)
+  const likeOf = (vid, base) => likeOv[vid] || base || 'INDIFFERENT';
+
+  function toast(msg) {
+    const t = $('#toast');
+    t.textContent = msg;
+    t.classList.add('show');
+    clearTimeout(toast.t);
+    toast.t = setTimeout(() => t.classList.remove('show'), 2600);
+  }
+  const errText = (e) => String((e && e.message) || e).replace(/^Error invoking remote method '[^']+': Error: /, '');
+
+  function refreshHearts() {
+    const vid = lastState.playerId || lastState.videoId;
+    const on = !!vid && likeOf(vid, lastState.like) === 'LIKE';
+    for (const id of ['p-like', 'f-like']) $('#' + id).classList.toggle('liked', on);
+  }
+
+  async function setLike(vid, status) {
+    const before = likeOv[vid];
+    likeOv[vid] = status;
+    refreshHearts();
+    try {
+      await window.neo.service({ act: 'like', status, videoId: vid });
+      toast(status === 'LIKE' ? 'Ajouté aux titres aimés' : 'Retiré des titres aimés');
+    } catch (e) {
+      if (before) likeOv[vid] = before; else delete likeOv[vid];
+      refreshHearts();
+      toast("Impossible de modifier le J'aime : " + errText(e));
+    }
+  }
+
+  for (const id of ['p-like', 'f-like']) {
+    $('#' + id).addEventListener('click', (e) => {
+      e.stopPropagation();
+      const vid = lastState.playerId || lastState.videoId;
+      if (!vid) return;
+      setLike(vid, likeOf(vid, lastState.like) === 'LIKE' ? 'INDIFFERENT' : 'LIKE');
+    });
+  }
+
+  // ---------- File d'attente (lire ensuite / ajouter à la file) ----------
+  function plFor(id) {
+    return queue && queue.noList && queue.noList.has(id) ? '' : queue ? queue.playlistId : '';
+  }
+  function queueAdd(videoId, pos, item) {
+    const cur = lastState.videoId;
+    if (!queue) {
+      if (!cur) { startPlay({ videoId }, item); return; }
+      queue = { playlistId: '', ids: [cur], i: 0 };
+    }
+    if (!queue.custom) { queue.ids = queue.ids.slice(); queue.custom = true; }
+    queue.noList = queue.noList || new Set();
+    if (!queue.ids.includes(videoId) || pos === 'next') {
+      if (queue.ids.includes(videoId)) queue.ids.splice(queue.ids.indexOf(videoId), 1);
+      if (pos === 'next') queue.ids.splice(queue.i + 1, 0, videoId); else queue.ids.push(videoId);
+    }
+    if (videoId !== cur) queue.noList.add(videoId);
+    toast(pos === 'next' ? 'Sera lu ensuite' : 'Ajouté à la file d\'attente');
+  }
+
+  function removeRow(row, item) {
+    const vid = item.videoId;
+    if (row) row.remove();
+    const drop = (arr) => {
+      const k = arr.indexOf(vid);
+      if (k >= 0) arr.splice(k, 1);
+      return k;
+    };
+    drop(ctx.ids);
+    if (queue && queue.ids !== ctx.ids) { const k = drop(queue.ids); if (k >= 0 && k <= queue.i) queue.i = Math.max(0, queue.i - 1); }
+  }
+
+  // ---------- Menu « ⋮ » ----------
+  function closeMenu() {
+    const m = $('#menu');
+    m.hidden = true;
+    m.replaceChildren();
+    document.querySelectorAll('.more.open').forEach((b) => b.classList.remove('open'));
+  }
+
+  async function copyText(t) {
+    try { await navigator.clipboard.writeText(t); toast('Lien copié'); }
+    catch (e) { toast('Copie impossible'); }
+  }
+
+  async function runService(spec, okMsg) {
+    try { await window.neo.service(spec); if (okMsg) toast(okMsg); return true; }
+    catch (e) { toast('Échec : ' + errText(e)); return false; }
+  }
+
+  async function pickPlaylist(videoId) {
+    const d = $('#dialog');
+    d.hidden = false;
+    const box = el('div', { class: 'box' }, el('h3', {}, 'Enregistrer dans une playlist'), el('div', { class: 'msg', style: 'padding:24px' }, 'Chargement…'));
+    d.replaceChildren(box);
+    d.onclick = (e) => { if (e.target === d) d.hidden = true; };
+    try {
+      const lists = await window.neo.playlistsFor(videoId);
+      const rows = lists.length
+        ? lists.map((p) => el('button', { class: 'mi', onclick: async () => {
+            d.hidden = true;
+            try { await window.neo.addToPlaylist(p.playlistId, videoId); toast(`Ajouté à « ${p.title} »`); }
+            catch (e) { toast('Échec : ' + errText(e)); }
+          } }, p.title + (p.has ? '  ✓' : '')))
+        : [el('div', { class: 'msg', style: 'padding:24px' }, 'Aucune playlist trouvée.')];
+      box.replaceChildren(el('h3', {}, 'Enregistrer dans une playlist'), ...rows);
+    } catch (e) {
+      box.replaceChildren(el('h3', {}, 'Enregistrer dans une playlist'), el('div', { class: 'msg', style: 'padding:24px' }, 'Impossible de charger tes playlists : ' + errText(e)));
+    }
+  }
+
+  function openMenu(item, anchor, row) {
+    const m = $('#menu');
+    const vid = item.videoId || (item.play && item.play.videoId) || '';
+    const entries = [];
+    if (item.kind === 'song' && vid) {
+      const st = likeOf(vid, item.like);
+      entries.push({ label: st === 'LIKE' ? 'Retirer des titres aimés' : 'Ajouter aux titres aimés', run: () => setLike(vid, st === 'LIKE' ? 'INDIFFERENT' : 'LIKE') });
+    }
+    for (const e of item.menu || []) {
+      if (e.act === 'browse') entries.push({ label: e.label, run: () => go({ name: 'detail', browseId: e.browseId, title: e.label, from: current.from || current.name }) });
+      else if (e.act === 'play') entries.push({ label: e.label, run: () => startPlay({ videoId: e.videoId, playlistId: e.playlistId }, item) });
+      else if (e.act === 'queue') entries.push({ label: e.label, run: () => queueAdd(e.videoId, e.pos, item) });
+      else if (e.act === 'addToPlaylist') entries.push({ label: e.label, run: () => pickPlaylist(e.videoId) });
+      else if (e.act === 'like' || e.act === 'edit') entries.push({ label: e.label, danger: !!e.removes, run: async () => {
+        if (await runService(e)) {
+          if (e.act === 'like') likeOv[e.videoId] = e.status;
+          if (e.removes) { removeRow(row, item); toast('Supprimé de la playlist'); refreshHearts(); }
+        }
+      } });
+      else if (e.act === 'feedback') entries.push({ label: e.label, run: () => runService(e, 'Fait') });
+      else if (e.act === 'toggle') entries.push({ label: e.toggled ? e.labelOn : e.label, run: async () => {
+        if (await runService(e.toggled ? e.off : e.on, 'Fait')) e.toggled = !e.toggled;
+      } });
+    }
+    if (vid) entries.push({ label: 'Copier le lien', run: () => copyText(`https://music.youtube.com/watch?v=${vid}`) });
+    else if (item.play && item.play.playlistId) entries.push({ label: 'Copier le lien', run: () => copyText(`https://music.youtube.com/playlist?list=${item.play.playlistId}`) });
+
+    m.replaceChildren(...entries.map((en) => el('button', { class: `mi${en.danger ? ' danger' : ''}`, onclick: () => { closeMenu(); en.run(); } }, en.label)));
+    m.hidden = false;
+    anchor.classList.add('open');
+    const r = anchor.getBoundingClientRect();
+    const w = m.offsetWidth, h = m.offsetHeight;
+    let left = Math.min(Math.max(8, r.right - w), innerWidth - w - 8);
+    let top = r.bottom + 6;
+    if (top + h > innerHeight - 8) top = Math.max(8, r.top - h - 6);
+    m.style.left = left + 'px';
+    m.style.top = top + 'px';
+  }
+  document.addEventListener('mousedown', (e) => { if (!$('#menu').hidden && !e.target.closest('#menu') && !e.target.closest('.more')) closeMenu(); });
+  view.addEventListener('scroll', closeMenu);
+  window.addEventListener('resize', closeMenu);
 
   // ---------- vues ----------
   async function render() {
@@ -419,14 +591,14 @@
         if (queue.shuffled) {
           if (s.videoId !== queue.ids[queue.i] && queue.i + 1 < queue.ids.length) {
             queue.i += 1;
-            startPlay({ videoId: queue.ids[queue.i], playlistId: queue.playlistId }, null, { keepQueue: true });
+            startPlay({ videoId: queue.ids[queue.i], playlistId: plFor(queue.ids[queue.i]) }, null, { keepQueue: true });
           }
         } else if (idx >= 0) {
           queue.i = idx;
         } else if (s.playlistId && s.playlistId !== queue.playlistId && queue.i + 1 < queue.ids.length) {
           // YouTube Music est sorti de la playlist : on revient dessus
           queue.i += 1;
-          startPlay({ videoId: queue.ids[queue.i], playlistId: queue.playlistId }, null, { keepQueue: true });
+          startPlay({ videoId: queue.ids[queue.i], playlistId: plFor(queue.ids[queue.i]) }, null, { keepQueue: true });
         }
       }
     } else if (!queue && s.hold) {
@@ -436,6 +608,8 @@
     if (pending && !(pending.videoId && s.videoId === pending.videoId)) { syncButtons(); return; }
     const has = !!(s.title || s.videoId);
     $('#player').classList.toggle('empty', !has);
+    { const k = s.playerId || s.videoId; if (k && likeOv[k] && s.like === likeOv[k]) delete likeOv[k]; }
+    refreshHearts();
     $('#p-title').textContent = s.title || 'Rien en lecture';
     $('#p-artist').textContent = s.artist || '';
     $('#f-title').textContent = s.title || '';
@@ -482,14 +656,14 @@
   function nextTrack() {
     if (queue && queue.i + 1 < queue.ids.length) {
       queue.i += 1;
-      return startPlay({ videoId: queue.ids[queue.i], playlistId: queue.playlistId }, null, { keepQueue: true });
+      return startPlay({ videoId: queue.ids[queue.i], playlistId: plFor(queue.ids[queue.i]) }, null, { keepQueue: true });
     }
     window.neo.cmd('next');
   }
   function prevTrack() {
     if (queue && !(lastState.currentTime > 3) && queue.i > 0) {
       queue.i -= 1;
-      return startPlay({ videoId: queue.ids[queue.i], playlistId: queue.playlistId }, null, { keepQueue: true });
+      return startPlay({ videoId: queue.ids[queue.i], playlistId: plFor(queue.ids[queue.i]) }, null, { keepQueue: true });
     }
     if (queue) return window.neo.cmd('seek', 0);
     window.neo.cmd('prev');
@@ -502,7 +676,7 @@
   $('#p-open').addEventListener('click', () => { if (lastState.title) $('#full').hidden = false; });
   $('#f-close').addEventListener('click', () => ($('#full').hidden = true));
   document.addEventListener('keydown', (e) => {
-    if (e.key === 'Escape') $('#full').hidden = true;
+    if (e.key === 'Escape') { $('#full').hidden = true; closeMenu(); $('#dialog').hidden = true; }
     if (e.code === 'Space' && !/INPUT|TEXTAREA/.test(document.activeElement.tagName)) { e.preventDefault(); toggle(); }
   });
 

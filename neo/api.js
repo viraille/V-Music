@@ -22,9 +22,15 @@ function dump(debugDir, name, data) {
   }
 }
 
+const ALLOWED = new Set([
+  'browse', 'search', 'like/like', 'like/dislike', 'like/removelike',
+  'browse/edit_playlist', 'feedback', 'playlist/get_add_to_playlist',
+]);
+const ID = /^[\w-]{3,80}$/;
+
 function createApi(getEngine, waitLoaded, debugDir) {
   async function call(endpoint, body) {
-    if (!['browse', 'search'].includes(endpoint)) throw new Error('endpoint refusé');
+    if (!ALLOWED.has(endpoint)) throw new Error('endpoint refusé');
     for (let attempt = 0; attempt < 4; attempt++) {
       const wc = getEngine();
       if (!wc || wc.isDestroyed()) throw new Error('moteur indisponible');
@@ -93,6 +99,52 @@ function createApi(getEngine, waitLoaded, debugDir) {
       if (!/^[\w%=.~-]{10,4000}$/.test(token)) throw new Error('jeton invalide');
       const j = await call(kind === 'search' ? 'search' : 'browse', { continuation: token });
       return parseContinuation(j);
+    },
+    // Actions du menu « ⋮ » et du bouton J'aime
+    async service(spec) {
+      if (!spec || typeof spec !== 'object') throw new Error('action invalide');
+      if (spec.act === 'like') {
+        const ep = { LIKE: 'like/like', DISLIKE: 'like/dislike', INDIFFERENT: 'like/removelike' }[spec.status];
+        if (!ep || !ID.test(spec.videoId || '')) throw new Error('action invalide');
+        await call(ep, { target: { videoId: spec.videoId } });
+      } else if (spec.act === 'edit') {
+        const b = spec.body || {};
+        const okActions = Array.isArray(b.actions) && b.actions.length > 0 &&
+          b.actions.every((x) => x && /^ACTION_[A-Z_]+$/.test(x.action || ''));
+        if (!ID.test(b.playlistId || '') || !okActions) throw new Error('action invalide');
+        const j = await call('browse/edit_playlist', { playlistId: b.playlistId, actions: b.actions });
+        if (j.status && j.status !== 'STATUS_SUCCEEDED') throw new Error('refusé par YouTube Music');
+      } else if (spec.act === 'feedback') {
+        if (!/^[\w-]{20,600}$/.test(spec.token || '')) throw new Error('action invalide');
+        await call('feedback', { feedbackTokens: [spec.token] });
+      } else {
+        throw new Error('action inconnue');
+      }
+      return true;
+    },
+    async playlistsFor(videoId) {
+      if (!ID.test(videoId || '')) throw new Error('identifiant invalide');
+      const j = await call('playlist/get_add_to_playlist', { videoId });
+      const out = [];
+      (function walk(n, d) {
+        if (!n || typeof n !== 'object' || d > 40) return;
+        if (n.playlistAddToOptionRenderer) {
+          const r = n.playlistAddToOptionRenderer;
+          if (r.playlistId) out.push({ playlistId: r.playlistId, title: require('./parse').text(r.title), has: r.containsSelectedVideos === 'ALL' });
+          return;
+        }
+        for (const v of Object.values(n)) walk(v, d + 1);
+      })(j, 0);
+      return out;
+    },
+    async addToPlaylist(playlistId, videoId) {
+      if (!ID.test(playlistId || '') || !ID.test(videoId || '')) throw new Error('identifiant invalide');
+      const j = await call('browse/edit_playlist', {
+        playlistId,
+        actions: [{ action: 'ACTION_ADD_VIDEO', addedVideoId: videoId, dedupeOption: 'DEDUPE_OPTION_SKIP' }],
+      });
+      if (j.status && j.status !== 'STATUS_SUCCEEDED') throw new Error('refusé par YouTube Music');
+      return true;
     },
     async library(kind) {
       const ids = {

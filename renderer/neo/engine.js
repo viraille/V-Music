@@ -42,6 +42,7 @@
     } catch (e) {}
     return {
       playerId,
+      like: (document.querySelector('ytmusic-player-bar ytmusic-like-button-renderer') || document.querySelector('ytmusic-like-button-renderer') || { getAttribute: () => '' }).getAttribute('like-status') || '',
       videoId: url.searchParams.get('v') || '',
       playlistId: url.searchParams.get('list') || '',
       title: (md && md.title) || bar?.querySelector('.title')?.textContent?.trim() || '',

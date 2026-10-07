@@ -89,6 +89,62 @@ function finish(item, nav, play) {
   return item;
 }
 
+// Menu « ⋮ » d'un élément : on garde seulement ce dont l'interface a besoin.
+function serviceOf(ep) {
+  if (!ep) return null;
+  if (ep.queueAddEndpoint) {
+    const q = ep.queueAddEndpoint;
+    const videoId = q.queueTarget && q.queueTarget.videoId;
+    if (!videoId) return null;
+    return { act: 'queue', pos: q.queueInsertPosition === 'INSERT_AFTER_CURRENT_VIDEO' ? 'next' : 'end', videoId };
+  }
+  if (ep.likeEndpoint && ep.likeEndpoint.target && ep.likeEndpoint.target.videoId) {
+    return { act: 'like', status: ep.likeEndpoint.status, videoId: ep.likeEndpoint.target.videoId };
+  }
+  if (ep.playlistEditEndpoint) {
+    const e = ep.playlistEditEndpoint;
+    return { act: 'edit', body: { playlistId: e.playlistId, actions: e.actions } };
+  }
+  if (ep.feedbackEndpoint && ep.feedbackEndpoint.feedbackToken) {
+    return { act: 'feedback', token: ep.feedbackEndpoint.feedbackToken };
+  }
+  return null;
+}
+
+function parseMenu(r) {
+  const mr = r.menu && r.menu.menuRenderer;
+  if (!mr) return { menu: [], like: undefined };
+  let like;
+  for (const b of mr.topLevelButtons || []) if (b.likeButtonRenderer) like = b.likeButtonRenderer.likeStatus;
+  const menu = [];
+  for (const it of mr.items || []) {
+    const nav = it.menuNavigationItemRenderer;
+    const svc = it.menuServiceItemRenderer;
+    const tog = it.toggleMenuServiceItemRenderer;
+    if (nav) {
+      const label = text(nav.text);
+      const ep = nav.navigationEndpoint || {};
+      if (ep.browseEndpoint) menu.push({ label, act: 'browse', browseId: ep.browseEndpoint.browseId });
+      else if (ep.watchEndpoint || ep.watchPlaylistEndpoint) {
+        const o = readEndpoint(ep, {});
+        menu.push({ label, act: 'play', videoId: o.videoId || '', playlistId: o.playlistId || '' });
+      } else if (ep.addToPlaylistEndpoint && ep.addToPlaylistEndpoint.videoId) {
+        menu.push({ label, act: 'addToPlaylist', videoId: ep.addToPlaylistEndpoint.videoId });
+      }
+    } else if (svc) {
+      const a = serviceOf(svc.serviceEndpoint);
+      if (a) menu.push({ label: text(svc.text), removes: svc.icon?.iconType === 'REMOVE_FROM_PLAYLIST', ...a });
+    } else if (tog) {
+      const on = serviceOf(tog.defaultServiceEndpoint);
+      const off = serviceOf(tog.toggledServiceEndpoint);
+      if (on && off) {
+        menu.push({ label: text(tog.defaultText), labelOn: text(tog.toggledText), act: 'toggle', on, off });
+      }
+    }
+  }
+  return { menu, like };
+}
+
 function parseTwoRow(r) {
   const nav = readEndpoint(r.navigationEndpoint, {});
   const play = playOf(r);
@@ -96,7 +152,11 @@ function parseTwoRow(r) {
   const kind = kindOf(nav, play, subtitle.split(/[•·]/)[0]);
   const title = text(r.title);
   if (!title) return null;
-  return finish({ kind, title, subtitle, thumb: thumbOf(r), duration: '' }, nav, play);
+  const item = finish({ kind, title, subtitle, thumb: thumbOf(r), duration: '' }, nav, play);
+  const m = parseMenu(r);
+  item.menu = m.menu;
+  if (m.like) item.like = m.like;
+  return item;
 }
 
 function parseResponsive(r) {
@@ -122,7 +182,11 @@ function parseResponsive(r) {
     (/^\d+:\d{2}(:\d{2})?$/.test((cols[1]?.runs || []).slice(-1)[0]?.text || '')
       ? cols[1].runs.slice(-1)[0].text
       : '');
-  return finish({ kind, title, subtitle, thumb: thumbOf(r), duration }, nav, play);
+  const item = finish({ kind, title, subtitle, thumb: thumbOf(r), duration }, nav, play);
+  const m = parseMenu(r);
+  item.menu = m.menu;
+  if (m.like) item.like = m.like;
+  return item;
 }
 
 function collect(list) {
