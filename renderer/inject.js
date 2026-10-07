@@ -38,6 +38,42 @@
   addSettingsButton();
   setInterval(addSettingsButton, 2000);
 
+  // ---------- Filet de sécurité : pub qui passe quand même ----------
+  // Si malgré le blocage réseau une pub arrive jusqu'au lecteur, YouTube
+  // marque le lecteur avec la classe "ad-showing". Dans ce cas on coupe le
+  // son et on saute directement à la fin de la pub. On ne se base volontairement
+  // que sur cette classe : un faux positif ferait sauter un vrai morceau.
+  let mutedByUs = false;
+
+  function isAdShowing() {
+    return !!document.querySelector('.html5-video-player.ad-showing, #movie_player.ad-showing');
+  }
+
+  function skipAdIfAny() {
+    const video = document.querySelector('video');
+    if (!video) return;
+
+    if (isAdShowing()) {
+      const skipButton = document.querySelector(
+        '.ytp-ad-skip-button, .ytp-ad-skip-button-modern, .ytp-skip-ad-button'
+      );
+      if (skipButton) skipButton.click();
+
+      if (!video.muted) {
+        video.muted = true;
+        mutedByUs = true;
+      }
+      if (isFinite(video.duration) && video.duration > 0) {
+        video.currentTime = video.duration;
+      }
+    } else if (mutedByUs) {
+      video.muted = false;
+      mutedByUs = false;
+    }
+  }
+
+  setInterval(skipAdIfAny, 250);
+
   // ---------- État de lecture : classe CSS + taskbar + Discord ----------
   function getPlaybackInfo() {
     const video = document.querySelector('video');
@@ -112,7 +148,14 @@
       window.__ytmcSetProgress(info.ratio, info.isPlaying);
     }
 
-    if (canSavePlayback && window.__ytmcSavePlayback && info.videoId && info.duration > 0) {
+    // Pas d'enregistrement pendant une pub : sa position n'est pas celle du morceau.
+    if (
+      canSavePlayback &&
+      !isAdShowing() &&
+      window.__ytmcSavePlayback &&
+      info.videoId &&
+      info.duration > 0
+    ) {
       window.__ytmcSavePlayback({ videoId: info.videoId, position: info.currentTime });
     }
 

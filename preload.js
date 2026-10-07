@@ -50,6 +50,51 @@ window.__ytmcGetResume = () => ipcRenderer.invoke('playback:getResume');
     );
   }
 
+  // --- Patch JSON.parse ---
+  // Filet de sécurité : YouTube peut aussi recevoir ses infos de pub par un
+  // autre chemin que les appels fetch/XHR ci-dessous (données déjà dans la
+  // page au chargement, autre endpoint...). Comme elles passent presque
+  // toujours par JSON.parse, on nettoie là aussi, mais seulement quand
+  // l'objet décodé ressemble à une réponse de lecteur, pour ne pas ralentir
+  // tout le reste.
+  const originalParse = JSON.parse;
+  JSON.parse = function (...args) {
+    const result = originalParse.apply(this, args);
+    try {
+      if (
+        result &&
+        typeof result === 'object' &&
+        (result.adPlacements ||
+          result.playerAds ||
+          result.adSlots ||
+          result.playerResponse ||
+          result.streamingData)
+      ) {
+        stripAds(result);
+      }
+    } catch (e) {
+      // on ne casse jamais le parsing à cause du nettoyage
+    }
+    return result;
+  };
+
+  // Réponse de lecteur injectée directement dans le HTML de la page
+  // (cas du chargement direct d'une page de morceau) : on nettoie au moment
+  // où la page l'assigne.
+  let initialPlayerResponse;
+  try {
+    Object.defineProperty(window, 'ytInitialPlayerResponse', {
+      configurable: true,
+      get: () => initialPlayerResponse,
+      set: (value) => {
+        stripAds(value);
+        initialPlayerResponse = value;
+      },
+    });
+  } catch (e) {
+    // propriété déjà verrouillée : pas grave
+  }
+
   // --- Patch fetch ---
   const originalFetch = window.fetch;
   window.fetch = async function (...args) {
@@ -89,6 +134,11 @@ window.__ytmcGetResume = () => ipcRenderer.invoke('playback:getResume');
     xhr.addEventListener('readystatechange', function () {
       if (xhr.readyState === 4 && isPlayerEndpoint(targetUrl)) {
         try {
+          // Réponse déjà décodée en objet : on la nettoie sur place.
+          if (xhr.responseType === 'json') {
+            stripAds(xhr.response);
+            return;
+          }
           const data = JSON.parse(xhr.responseText);
           stripAds(data);
           Object.defineProperty(xhr, 'responseText', {
