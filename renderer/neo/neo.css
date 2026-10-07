@@ -1,12 +1,14 @@
 :root {
-  --bg: #111116;
-  --surface: #1a1a21;
-  --surface-2: #23232c;
-  --surface-3: #2d2d38;
-  --text: #ececf1;
-  --dim: #9b9ba8;
-  --accent: #b9a4ff;
-  --accent-ink: #1d1233;
+  /* Palette tirée du logo requin : bleus océan, requin bleu clair, touche corail */
+  --bg: #08141f;
+  --surface: #0e2234;
+  --surface-2: #153049;
+  --surface-3: #1e405f;
+  --text: #e9f4fb;
+  --dim: #8fb0c7;
+  --accent: #5cd0f0;
+  --accent-ink: #062336;
+  --coral: #f6a08c;
   --radius: 20px;
 }
 * { box-sizing: border-box; }
@@ -23,7 +25,8 @@ svg { width: 24px; height: 24px; fill: currentColor; flex-shrink: 0; }
 
 /* ---------- Barre latérale ---------- */
 #rail { grid-row: 1 / 2; display: flex; flex-direction: column; align-items: center; gap: 6px; padding: 14px 0; }
-.logo { width: 42px; height: 42px; border-radius: 14px; background: var(--accent); color: var(--accent-ink); font-weight: 800; font-size: 22px; display: grid; place-items: center; margin-bottom: 14px; transition: background .6s; }
+.logo { width: 46px; height: 46px; border-radius: 15px; overflow: hidden; margin-bottom: 14px; box-shadow: 0 4px 14px rgba(0,0,0,.4); }
+.logo img { width: 100%; height: 100%; object-fit: cover; display: block; }
 .nav { width: 64px; padding: 6px 0 8px; border-radius: 16px; display: flex; flex-direction: column; align-items: center; gap: 3px; color: var(--dim); font-size: 11px; transition: color .15s; }
 .nav svg { width: 26px; height: 26px; padding: 4px 16px; box-sizing: content-box; border-radius: 999px; transition: background .2s; }
 .nav:hover { color: var(--text); }
@@ -126,7 +129,8 @@ input[type=range]:hover::-webkit-slider-thumb { transform: scale(1); }
 /* ---------- Lecteur plein écran ---------- */
 #full { position: fixed; inset: 0; z-index: 20; display: grid; place-items: center; background: var(--bg); animation: up .32s cubic-bezier(.2,.8,.2,1); overflow: hidden; }
 @keyframes up { from { transform: translateY(8%); opacity: 0; } to { transform: none; opacity: 1; } }
-#f-bg { position: absolute; inset: -60px; background-size: cover; background-position: center; filter: blur(70px) saturate(1.4) brightness(.45); transform: scale(1.2); transition: background-image .6s; }
+#f-bg::after { content:''; position:absolute; inset:0; background: linear-gradient(180deg, rgba(8,20,31,.35), rgba(8,20,31,.75)); }
+#f-bg { position: absolute; inset: -60px; background-size: cover; background-position: center; filter: blur(70px) saturate(1.2) brightness(.4) hue-rotate(0deg); transform: scale(1.2); transition: background-image .6s; }
 #f-close { position: absolute; top: 18px; left: 22px; background: rgba(0,0,0,.25); }
 .f-body { position: relative; width: min(440px, 88vw); display: flex; flex-direction: column; align-items: center; text-align: center; gap: 6px; }
 #f-img { width: min(400px, 46vh); height: min(400px, 46vh); border-radius: 36px; object-fit: cover; box-shadow: 0 30px 70px rgba(0,0,0,.55); margin-bottom: 22px; background: var(--surface-3); }
