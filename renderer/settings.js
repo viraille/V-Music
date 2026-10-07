@@ -17,6 +17,7 @@ async function load() {
   const settings = await ipcRenderer.invoke('settings:get');
   document.getElementById('adBlock').checked = settings.adBlockEnabled;
   document.getElementById('animations').checked = settings.animationsEnabled;
+  document.getElementById('splash').checked = settings.splashEnabled !== false;
   document.getElementById('taskbarProgress').checked = settings.taskbarProgressEnabled;
 
   document.getElementById('reporting').checked = settings.reportingEnabled;
@@ -34,6 +35,10 @@ document.getElementById('adBlock').addEventListener('change', (e) => {
 
 document.getElementById('animations').addEventListener('change', (e) => {
   ipcRenderer.send('settings:set', 'animationsEnabled', e.target.checked);
+});
+
+document.getElementById('splash').addEventListener('change', (e) => {
+  ipcRenderer.send('settings:set', 'splashEnabled', e.target.checked);
 });
 
 document.getElementById('taskbarProgress').addEventListener('change', (e) => {

@@ -22,6 +22,7 @@ const store = new Store({
     reportingEnabled: true,
     reportingUsername: os.userInfo().username,
     reportingClientId: null,
+    splashEnabled: true,
     windowBounds: null,
     windowMaximized: false,
     lastUrl: null,
@@ -227,7 +228,7 @@ function openSettingsWindow() {
   }
   settingsWindow = new BrowserWindow({
     width: 380,
-    height: 460,
+    height: 530,
     resizable: false,
     title: 'Paramètres',
     icon: path.join(__dirname, 'build', 'icon.ico'),
@@ -282,8 +283,52 @@ function flushPlayback() {
   pendingPlayback = null;
 }
 
+// ---------- Écran de lancement (animation requin) ----------
+// Petite fenêtre sans bordure affichée pendant que YouTube Music charge. Elle
+// reste jusqu'à ce que la fenêtre principale soit prête (et au moins le temps
+// de l'animation), puis les deux s'échangent.
+let splashWindow = null;
+const SPLASH_MIN_MS = 1100; // animation (~900 ms) + une petite marge
+const SPLASH_MAX_MS = 15000; // sécurité : on ouvre quand même si le chargement traîne
+
+function showSplash() {
+  splashWindow = new BrowserWindow({
+    width: 420,
+    height: 420,
+    frame: false,
+    transparent: true,
+    hasShadow: false,
+    resizable: false,
+    movable: false,
+    alwaysOnTop: true,
+    skipTaskbar: true,
+    show: false,
+    center: true,
+    icon: path.join(__dirname, 'build', 'icon.ico'),
+    webPreferences: {
+      contextIsolation: true,
+      nodeIntegration: false,
+    },
+  });
+  splashWindow.once('ready-to-show', () => {
+    if (splashWindow && !splashWindow.isDestroyed()) splashWindow.show();
+  });
+  splashWindow.on('closed', () => {
+    splashWindow = null;
+  });
+  splashWindow.loadFile(path.join(__dirname, 'renderer', 'splash.html'));
+}
+
+function closeSplash() {
+  if (splashWindow && !splashWindow.isDestroyed()) splashWindow.close();
+}
+
 // ---------- Fenêtre principale ----------
 function createWindow() {
+  const useSplash = store.get('splashEnabled', true);
+  const splashStartedAt = Date.now();
+  if (useSplash) showSplash();
+
   const ytSession = session.fromPartition('persist:ytmusic-custom');
 
   ytSession.webRequest.onBeforeRequest((details, callback) => {
@@ -321,6 +366,7 @@ function createWindow() {
     width: 1280,
     height: 800,
     ...(savedBounds || {}),
+    show: !useSplash, // avec l'écran de lancement, on n'affiche qu'une fois prête
     backgroundColor: '#0b0b0f',
     icon: path.join(__dirname, 'build', 'icon.ico'),
     autoHideMenuBar: true,
@@ -333,7 +379,27 @@ function createWindow() {
   });
 
   mainWindow = win;
-  if (store.get('windowMaximized', false)) win.maximize();
+  // Sans écran de lancement, on maximise tout de suite. Avec, on attend le
+  // moment d'afficher (maximize() ferait apparaître la fenêtre trop tôt).
+  if (!useSplash && store.get('windowMaximized', false)) win.maximize();
+
+  let revealed = false;
+  const revealMainWindow = () => {
+    if (revealed || win.isDestroyed()) return;
+    revealed = true;
+    const wait = Math.max(0, SPLASH_MIN_MS - (Date.now() - splashStartedAt));
+    setTimeout(() => {
+      if (win.isDestroyed()) return;
+      if (store.get('windowMaximized', false)) win.maximize();
+      win.show();
+      win.focus();
+      closeSplash();
+    }, wait);
+  };
+  if (useSplash) {
+    win.once('ready-to-show', revealMainWindow);
+    setTimeout(revealMainWindow, SPLASH_MAX_MS);
+  }
 
   // Sauvegarde de la position/taille (avec un petit délai pour ne pas
   // écrire pendant tout le glisser/redimensionner).
