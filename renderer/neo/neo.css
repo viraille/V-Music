@@ -1,11 +1,11 @@
 :root {
-  /* Palette tirée du logo requin : bleus océan, requin bleu clair, touche corail */
-  --bg: #08141f;
-  --surface: #0e2234;
-  --surface-2: #153049;
-  --surface-3: #1e405f;
-  --text: #e9f4fb;
-  --dim: #8fb0c7;
+  /* Fond noir, couleurs d'accent tirées du logo requin (bleu océan) */
+  --bg: #0a0a0d;
+  --surface: #131318;
+  --surface-2: #1c1c23;
+  --surface-3: #282832;
+  --text: #ececf1;
+  --dim: #9a9aa8;
   --accent: #5cd0f0;
   --accent-ink: #062336;
   --coral: #f6a08c;
@@ -129,7 +129,7 @@ input[type=range]:hover::-webkit-slider-thumb { transform: scale(1); }
 /* ---------- Lecteur plein écran ---------- */
 #full { position: fixed; inset: 0; z-index: 20; display: grid; place-items: center; background: var(--bg); animation: up .32s cubic-bezier(.2,.8,.2,1); overflow: hidden; }
 @keyframes up { from { transform: translateY(8%); opacity: 0; } to { transform: none; opacity: 1; } }
-#f-bg::after { content:''; position:absolute; inset:0; background: linear-gradient(180deg, rgba(8,20,31,.35), rgba(8,20,31,.75)); }
+#f-bg::after { content:''; position:absolute; inset:0; background: linear-gradient(180deg, rgba(10,10,13,.35), rgba(10,10,13,.78)); }
 #f-bg { position: absolute; inset: -60px; background-size: cover; background-position: center; filter: blur(70px) saturate(1.2) brightness(.4) hue-rotate(0deg); transform: scale(1.2); transition: background-image .6s; }
 #f-close { position: absolute; top: 18px; left: 22px; background: rgba(0,0,0,.25); }
 .f-body { position: relative; width: min(440px, 88vw); display: flex; flex-direction: column; align-items: center; text-align: center; gap: 6px; }
