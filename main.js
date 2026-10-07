@@ -63,6 +63,45 @@ function isAdRequest(url) {
   return AD_BLOCK_PATTERNS.some((pattern) => url.includes(pattern));
 }
 
+// --- Bloqueur basé sur des listes de filtres (bibliothèque Ghostery) ---
+// En plus de notre petite liste ci-dessus, on utilise les listes de filtres
+// publiques à jour (type EasyList), que la bibliothèque télécharge et met en
+// cache sur le disque. Tout est protégé par des try/catch : si la
+// bibliothèque est absente (npm install pas fait), échoue ou n'a pas
+// internet au premier lancement, l'appli garde simplement notre blocage
+// de base.
+//
+// On n'utilise que son filtrage réseau (le handler onBeforeRequest) et pas
+// enableBlockingInSession : ce dernier dépend d'une API Electron récente
+// (registerPreloadScript) absente d'Electron 31.
+let listBlocker = null;
+const ENGINE_MAX_AGE_MS = 7 * 24 * 60 * 60 * 1000; // listes rafraîchies chaque semaine
+
+async function initListBlocker() {
+  try {
+    const { ElectronBlocker } = require('@ghostery/adblocker-electron');
+    const cachePath = path.join(app.getPath('userData'), 'adblock-engine.bin');
+
+    // Cache trop vieux : on le supprime pour forcer un nouveau téléchargement
+    // des listes.
+    try {
+      const { mtimeMs } = await fs.promises.stat(cachePath);
+      if (Date.now() - mtimeMs > ENGINE_MAX_AGE_MS) await fs.promises.unlink(cachePath);
+    } catch (e) {
+      // pas de cache encore, normal au premier lancement
+    }
+
+    listBlocker = await ElectronBlocker.fromPrebuiltAdsOnly(fetch, {
+      path: cachePath,
+      read: fs.promises.readFile,
+      write: fs.promises.writeFile,
+    });
+  } catch (e) {
+    console.error('Bloqueur à listes indisponible, blocage de base conservé :', e.message);
+    listBlocker = null;
+  }
+}
+
 let mainWindow = null;
 let settingsWindow = null;
 
@@ -248,8 +287,32 @@ function createWindow() {
   const ytSession = session.fromPartition('persist:ytmusic-custom');
 
   ytSession.webRequest.onBeforeRequest((details, callback) => {
-    const shouldBlock = store.get('adBlockEnabled', true) && isAdRequest(details.url);
-    callback({ cancel: shouldBlock });
+    if (!store.get('adBlockEnabled', true)) {
+      callback({ cancel: false });
+      return;
+    }
+    if (isAdRequest(details.url)) {
+      callback({ cancel: true });
+      return;
+    }
+
+    // Listes de filtres (si chargées). Le garde "answered" évite de répondre
+    // deux fois à Electron si la bibliothèque plante après avoir répondu.
+    let answered = false;
+    const respond = (response) => {
+      if (answered) return;
+      answered = true;
+      callback(response);
+    };
+    if (listBlocker) {
+      try {
+        listBlocker.onBeforeRequest(details, respond);
+        return;
+      } catch (e) {
+        // on retombe sur "ne pas bloquer" ci-dessous
+      }
+    }
+    respond({ cancel: false });
   });
 
   const savedBounds = getRestorableBounds();
@@ -390,6 +453,9 @@ ipcMain.handle('playback:getResume', () => {
 
 // ---------- Cycle de vie ----------
 app.whenReady().then(() => {
+  // Sans await : la fenêtre s'ouvre tout de suite, les listes s'activent dès
+  // qu'elles sont prêtes.
+  initListBlocker();
   createWindow();
   if (store.get('overlayEnabled', false)) startOverlayServer();
   setInterval(flushPlayback, 5000);

@@ -4,12 +4,12 @@ A custom Electron desktop client for [YouTube Music](https://music.youtube.com),
 
 ## Features
 
-- 🚫 **Ad blocking** — strips ad-related network requests (video/audio ads, tracking, promo banners) before they even load
+- 🚫 **Ad blocking** — blocks ad-related network requests (built-in rules + regularly refreshed public filter lists), strips ad data from YouTube responses, and skips any ad that still reaches the player
 - 🎨 **Restyled UI** — custom CSS with smooth animations (toggleable)
 - 📊 **Taskbar progress bar** — current track progress shown directly on the Windows taskbar icon
 - 🪟 **No more stuck-open window** — fixes the native "leave site?" prompt that used to block the app from closing while music was playing
 - 🖥️ **OBS overlay** — a local Browser Source URL that shows the current track (artwork, title, artist, progress) live in your stream
-- 👥 **Listening dashboard** (optional) — see what track each instance of the app is playing in real time, via [Supabase](https://supabase.com). Off by default per install, togglable anytime in Settings, and the reporting only ever sends: a display name, a random per-install client ID, the current track title/artist, and play/pause state — nothing tied to your Google account
+- 👥 **Listening dashboard** (optional) — see what track each instance of the app is playing in real time, via [Supabase](https://supabase.com). **Enabled by default** and togglable anytime in Settings. When on, it sends only: a display name (defaults to your Windows username, editable in Settings), a random per-install client ID, the current track title/artist, and play/pause state — nothing tied to your Google account
 - ⚙️ **Settings window** — toggle every feature above without touching a config file, persisted across restarts
 
 ## Download

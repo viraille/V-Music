@@ -1,6 +1,6 @@
 {
   "name": "V-Music",
-  "version": "26.10.07",
+  "version": "26.10.08",
   "description": "Client desktop YouTube Music maison, avec bloqueur de pub réseau et interface custom",
   "main": "main.js",
   "scripts": {
@@ -8,6 +8,7 @@
     "dist:win": "electron-builder --win nsis portable --config.win.icon=assets/icon.ico"
   },
   "dependencies": {
+    "@ghostery/adblocker-electron": "^2.18.2",
     "electron-store": "^8.1.0"
   },
   "devDependencies": {
@@ -27,7 +28,10 @@
       "package.json"
     ],
     "win": {
-      "target": ["nsis", "portable"],
+      "target": [
+        "nsis",
+        "portable"
+      ],
       "icon": "assets/icon.ico"
     },
     "nsis": {
