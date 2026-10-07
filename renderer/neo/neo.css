@@ -205,3 +205,5 @@ input[type=range]:hover::-webkit-slider-thumb { transform: scale(1); }
   #searchbox { padding: 0 12px; }
   #searchbox svg { display: none; }
 }
+
+.cols2.list.one { grid-template-columns: 1fr; max-width: 900px; }

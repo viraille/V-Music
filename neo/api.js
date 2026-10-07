@@ -2,7 +2,7 @@
 // Appels à l'API interne de YouTube Music. Ils sont exécutés DANS la page
 // YouTube Music cachée (le "moteur") : elle a déjà la session connectée, le
 // bon contexte et le bon domaine, donc pas besoin de gérer cookies/CORS nous-mêmes.
-const { parseSections, parseDetail, parseContinuation } = require('./parse');
+const { parseSections, parseDetail, parseContinuation, parseChips } = require('./parse');
 
 const fs = require('fs');
 const path = require('path');
@@ -73,18 +73,25 @@ function createApi(getEngine, waitLoaded, debugDir) {
       const j = await call('browse', { browseId: 'FEmusic_home' });
       return { loggedIn: j.__loggedIn, sections: parseSections(j) };
     },
-    async search(query) {
-      const j = await call('search', { query });
-      return { sections: parseSections(j) };
+    async search(query, params) {
+      const body = { query };
+      if (params) {
+        if (!/^[\w%=-]{5,400}$/.test(params)) throw new Error('filtre invalide');
+        body.params = params;
+      }
+      const j = await call('search', body);
+      const sections = parseSections(j);
+      // En recherche filtrée, YouTube Music renvoie la suite par jeton
+      return { sections, chips: parseChips(j), continuation: params ? parseContinuation(j).token : '' };
     },
     async browse(browseId) {
       if (!/^[\w-]{3,80}$/.test(browseId)) throw new Error('identifiant invalide');
       const j = await call('browse', { browseId });
       return parseDetail(j, browseId);
     },
-    async more(token) {
+    async more(token, kind) {
       if (!/^[\w%=.~-]{10,4000}$/.test(token)) throw new Error('jeton invalide');
-      const j = await call('browse', { continuation: token });
+      const j = await call(kind === 'search' ? 'search' : 'browse', { continuation: token });
       return parseContinuation(j);
     },
     async library(kind) {

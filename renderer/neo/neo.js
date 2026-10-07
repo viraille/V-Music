@@ -135,7 +135,9 @@
     const songs = sec.items.filter((i) => i.kind === 'song');
     const wrap = el('div');
     if (sec.title) wrap.append(el('h2', { class: 'sec' }, sec.title));
-    if (songs.length && songs.length >= sec.items.length / 2) {
+    if (sec.layout === 'list') {
+      wrap.append(el('div', { class: 'cols2 list one' }, sec.items.map((i) => listRow(i, playlistId))));
+    } else if (songs.length && songs.length >= sec.items.length / 2) {
       wrap.append(el('div', { class: 'cols2 list' }, sec.items.map((i) => listRow(i, playlistId))));
     } else if (sec.items.length > 8) {
       wrap.append(el('div', { class: 'grid' }, sec.items.map(card)));
@@ -146,7 +148,7 @@
   }
 
   // Chargement automatique de la suite d'une longue liste quand on arrive en bas
-  function autoMore(token, playlistId, fallbackThumb) {
+  function autoMore(token, playlistId, fallbackThumb, kind) {
     if (!token) return;
     const list = [...view.querySelectorAll('.cols2.list')].pop();
     if (!list) return;
@@ -165,7 +167,7 @@
       if (running) return running;
       running = (async () => {
         try {
-          const r = await window.neo.more(tok);
+          const r = await window.neo.more(tok, kind);
           if (my !== token_()) { finish(); return false; }
           for (const it of r.items) {
             if (!it.thumb && fallbackThumb) it.thumb = fallbackThumb;
@@ -232,14 +234,20 @@
       } else if (v.name === 'search') {
         if (!v.q) return message('<b>Que veux-tu écouter ?</b><br>Tape un titre, un artiste ou un album dans la barre.');
         skeleton();
-        const data = await window.neo.search(v.q);
+        const data = await window.neo.search(v.q, v.params || '');
         if (my !== token) return;
+        const chips = data.chips && data.chips.length
+          ? el('div', { class: 'chips' }, [{ label: 'Tout', params: '' }, ...data.chips].map((c) =>
+              el('button', { class: `chip${(v.params || '') === c.params ? ' on' : ''}`, onclick: () => go({ name: 'search', q: v.q, params: c.params, chips: data.chips }, false) }, c.label)))
+          : v.chips ? el('div', { class: 'chips' }, [{ label: 'Tout', params: '' }, ...v.chips].map((c) =>
+              el('button', { class: `chip${(v.params || '') === c.params ? ' on' : ''}`, onclick: () => go({ name: 'search', q: v.q, params: c.params, chips: v.chips }, false) }, c.label))) : null;
         if (!data.sections.length) {
-          message('Aucun résultat pour <b id="nq"></b>.');
-          $('#nq').textContent = `« ${v.q} »`;
+          setView(chips, el('div', { class: 'msg' }, `Aucun résultat pour « ${v.q} ».`));
           return;
         }
-        setView(...data.sections.map((s) => sectionNode(s)));
+        ctx = { playlistId: '', ids: [] };
+        setView(chips, ...data.sections.map((s) => sectionNode(s)));
+        autoMore(data.continuation, '', '', 'search');
       } else if (v.name === 'library') {
         const tab = v.tab || 'playlists';
         const tabs = [['playlists', 'Playlists'], ['songs', 'Titres aimés'], ['albums', 'Albums'], ['artists', 'Artistes']];

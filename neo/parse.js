@@ -152,6 +152,7 @@ function parseCard(c) {
 // Parcourt la réponse et en sort une liste de sections { title, items }.
 function parseSections(json) {
   const sections = [];
+  let loose = null; // résultats en vrac (recherche) : une seule liste, dans l'ordre de YouTube Music
   const visit = (node, depth) => {
     if (!node || typeof node !== 'object' || depth > 30) return;
     if (Array.isArray(node)) return node.forEach((n) => visit(n, depth + 1));
@@ -172,6 +173,15 @@ function parseSections(json) {
         const top = parseCard(v);
         const items = [top, ...collect(v.contents)].filter((i) => i && i.title);
         if (items.length) sections.push({ title: 'Meilleur résultat', items });
+      } else if (key === 'itemSectionRenderer') {
+        const items = collect(v.contents);
+        if (items.length) {
+          if (!loose) {
+            loose = { title: 'Résultats', layout: 'list', items: [] };
+            sections.push(loose);
+          }
+          loose.items.push(...items);
+        }
       } else if (key === 'gridRenderer') {
         const items = collect(v.items);
         if (items.length) sections.push({ title: '', items });
@@ -182,6 +192,24 @@ function parseSections(json) {
   };
   visit(json, 0);
   return sections;
+}
+
+// Filtres proposés par la recherche (Titres, Albums, Vidéos...)
+function parseChips(json) {
+  const chips = [];
+  const visit = (n, depth) => {
+    if (!n || typeof n !== 'object' || depth > 40) return;
+    if (n.chipCloudChipRenderer) {
+      const c = n.chipCloudChipRenderer;
+      const label = text(c.text);
+      const params = c.navigationEndpoint?.searchEndpoint?.params;
+      if (label && params) chips.push({ label, params });
+      return;
+    }
+    for (const v of Object.values(n)) visit(v, depth + 1);
+  };
+  visit(json, 0);
+  return chips;
 }
 
 function findHeader(node, depth = 0) {
@@ -247,4 +275,4 @@ function parseContinuation(json) {
   return { items, token: findToken(json) };
 }
 
-module.exports = { parseSections, parseDetail, parseContinuation, findToken, text, sized };
+module.exports = { parseSections, parseDetail, parseContinuation, parseChips, findToken, text, sized };
