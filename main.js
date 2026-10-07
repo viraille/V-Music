@@ -529,6 +529,8 @@ function notifyLogin() {
 // Identité "Chrome" complète et cohérente : l'en-tête User-Agent, les indices client
 // (sec-ch-ua) et navigator.userAgentData disent tous la même chose. Google refuse
 // les navigateurs dont ces éléments se contredisent ou trahissent Electron.
+const withTimeout = (p, ms) => Promise.race([p, new Promise((resolve) => setTimeout(resolve, ms))]);
+
 async function presentAsChrome(wc) {
   const full = process.versions.chrome;
   const major = full.split('.')[0];
@@ -544,7 +546,7 @@ async function presentAsChrome(wc) {
   const base = loc.split('-')[0];
   try {
     if (!wc.debugger.isAttached()) wc.debugger.attach('1.3');
-    await wc.debugger.sendCommand('Emulation.setUserAgentOverride', {
+    await withTimeout(wc.debugger.sendCommand('Emulation.setUserAgentOverride', {
       userAgent: ua,
       acceptLanguage: base === loc ? loc : `${loc},${base}`,
       platform: plat.nav,
@@ -568,11 +570,16 @@ async function presentAsChrome(wc) {
         bitness: '64',
         wow64: false,
       },
-    });
-    await wc.debugger.sendCommand('Page.enable');
-    await wc.debugger.sendCommand('Page.addScriptToEvaluateOnNewDocument', {
-      source: "if (!window.chrome) { Object.defineProperty(window, 'chrome', { value: { app: { isInstalled: false }, runtime: {} }, configurable: true }); }",
-    });
+    }), 2500);
+    // Secondaire : on n'attend pas la réponse.
+    wc.debugger
+      .sendCommand('Page.enable')
+      .then(() =>
+        wc.debugger.sendCommand('Page.addScriptToEvaluateOnNewDocument', {
+          source: "if (!window.chrome) { Object.defineProperty(window, 'chrome', { value: { app: { isInstalled: false }, runtime: {} }, configurable: true }); }",
+        })
+      )
+      .catch(() => {});
   } catch (e) {
     // sans le débogueur on garde au moins le User-Agent propre
   }
@@ -593,7 +600,6 @@ function openLogin() {
     backgroundColor: '#202124',
     icon: path.join(__dirname, 'build', 'icon.ico'),
     autoHideMenuBar: true,
-    show: false,
     webPreferences: { session: ytSession, sandbox: true, contextIsolation: true, nodeIntegration: false },
   });
   loginWindow = w;
@@ -642,11 +648,11 @@ function openLogin() {
   wc.on('did-navigate', check);
   wc.on('did-finish-load', check);
 
-  presentAsChrome(wc).then(() => {
+  // La fenêtre s'affiche tout de suite ; la page de connexion se charge dès que l'identité
+  // "Chrome" est en place (ou après 3,5 s au plus, quoi qu'il arrive).
+  withTimeout(presentAsChrome(wc).catch(() => {}), 3500).then(() => {
     if (w.isDestroyed()) return;
-    wc.loadURL(LOGIN_URL);
-    w.show();
-    w.focus();
+    wc.loadURL(LOGIN_URL).catch(() => {});
   });
 }
 
