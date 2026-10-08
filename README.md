@@ -62,3 +62,5 @@ assets/icon.ico         App icon
 ## Listening dashboard
 
 Each install gets a random client ID on first launch. When enabled, it posts the current track + play state to a shared Supabase table roughly once every few seconds — used to power a small real-time dashboard showing who's listening to what. Can be disabled at any time from Settings; when disabled, nothing is sent at all.
+
+Each install also keeps a random secret (stored locally, never shown). Updates go through a Supabase function (`report_listening`) that checks it, so an install can only ever change its own row — nobody else can overwrite what you're shown as playing. Only a SHA-256 hash of the secret is stored server-side, in a schema the public API can't read.

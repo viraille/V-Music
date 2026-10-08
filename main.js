@@ -37,6 +37,15 @@ const store = new Store({
 if (!store.get('reportingClientId')) {
   store.set('reportingClientId', crypto.randomUUID());
 }
+// Secret de ce poste : prouve au dashboard que la ligne "client_id" est bien la sienne
+// (personne d'autre ne peut la modifier). Jamais affiché ni envoyé ailleurs.
+if (!store.get('reportingSecret')) {
+  store.set('reportingSecret', crypto.randomBytes(32).toString('hex'));
+}
+function resetReportingIdentity() {
+  store.set('reportingClientId', crypto.randomUUID());
+  store.set('reportingSecret', crypto.randomBytes(32).toString('hex'));
+}
 
 // --- Liste de domaines/segments d'URL liés à la pub et au tracking ---
 const AD_BLOCK_PATTERNS = [
@@ -189,33 +198,34 @@ async function sendReport(state) {
   if (now - lastReportSentAt < REPORT_MIN_INTERVAL_MS) return;
   lastReportSentAt = now;
 
+  // Fonction "report_listening" côté Supabase : elle vérifie le secret du poste avant
+  // d'écrire, donc personne ne peut modifier la ligne d'un autre.
   const payload = {
-    client_id: store.get('reportingClientId'),
-    username: store.get('reportingUsername', os.userInfo().username),
-    track_title: state.trackTitle || '',
-    track_artist: state.trackArtist || '',
-    is_playing: Boolean(state.isPlaying),
-    updated_at: new Date().toISOString(),
+    p_client_id: store.get('reportingClientId'),
+    p_secret: store.get('reportingSecret'),
+    p_username: store.get('reportingUsername', os.userInfo().username),
+    p_track_title: state.trackTitle || '',
+    p_track_artist: state.trackArtist || '',
+    p_is_playing: Boolean(state.isPlaying),
   };
 
   try {
     const controller = new AbortController();
     const timeout = setTimeout(() => controller.abort(), 5000);
-    await fetch(
-      `${SUPABASE_URL}/rest/v1/listening_status?on_conflict=client_id`,
-      {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-          apikey: SUPABASE_PUBLISHABLE_KEY,
-          Authorization: `Bearer ${SUPABASE_PUBLISHABLE_KEY}`,
-          Prefer: 'resolution=merge-duplicates,return=minimal',
-        },
-        body: JSON.stringify([payload]),
-        signal: controller.signal,
-      }
-    );
+    const res = await fetch(`${SUPABASE_URL}/rest/v1/rpc/report_listening`, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        apikey: SUPABASE_PUBLISHABLE_KEY,
+        Authorization: `Bearer ${SUPABASE_PUBLISHABLE_KEY}`,
+      },
+      body: JSON.stringify(payload),
+      signal: controller.signal,
+    });
     clearTimeout(timeout);
+    // Identifiant déjà pris par un autre poste (ou secret perdu) : on repart sur une
+    // nouvelle identité, le prochain envoi créera une nouvelle ligne.
+    if (res.status === 401 || res.status === 403) resetReportingIdentity();
   } catch (e) {
     // Supabase injoignable (pas de réseau, etc.), pas grave : on retentera
     // au prochain report. Pas d'erreur remontée à l'UI pour rester discret.
