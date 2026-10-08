@@ -32,6 +32,11 @@
   // Liste affichée en ce moment (pour savoir quel est le « morceau suivant ») et file en cours.
   let ctx = { playlistId: '', ids: [] };
   let queue = null; // { playlistId, ids, i }
+  // Répéter : 'off' (désactivé), 'all' (la liste en boucle), 'one' (le titre en boucle)
+  const REPEAT_MODES = ['off', 'all', 'one'];
+  let repeat = 'off';
+  try { const r = localStorage.getItem('neo.repeat'); if (REPEAT_MODES.includes(r)) repeat = r; } catch (e) {}
+  let replayArmed = false;
 
   // ---------- navigation ----------
   let current = { name: 'home' };
@@ -620,13 +625,20 @@
     const prevId = lastState.videoId;
     lastState = s;
     if (pending && isLoaded(s)) stopLoading();
-    if (queue && !pending && s.videoId) {
+    // Titre en boucle : à la fin, on revient au début du même morceau (pas de rechargement).
+    if (repeat === 'one' && !pending && s.videoId) {
+      if (!s.hold) window.neo.cmd('hold', true);
+      if (s.ended) {
+        if (!replayArmed) { replayArmed = true; window.neo.cmd('seek', 0); window.neo.cmd('play'); }
+      } else replayArmed = false;
+      if (queue) queue.endFor = null;
+    } else if (queue && !pending && s.videoId) {
       // On suit nous-mêmes la liste : l'engin fige la lecture juste avant la fin du morceau
       // (mode "hold") et c'est nous qui lançons le bon morceau suivant.
       if (!s.hold) window.neo.cmd('hold', true);
       if (s.ended && queue.endFor !== s.videoId) {
         queue.endFor = s.videoId;
-        if (queue.i + 1 < queue.ids.length) nextTrack();
+        if (queue.i + 1 < queue.ids.length || (repeat === 'all' && queue.ids.length)) nextTrack();
         else { queue = null; window.neo.cmd('hold', false); window.neo.cmd('play'); } // fin de liste : YouTube Music continue
       } else if (!s.ended) {
         const idx = queue.ids.indexOf(s.videoId);
@@ -645,6 +657,7 @@
       }
     } else if (!queue && s.hold) {
       window.neo.cmd('hold', false);
+      if (s.ended) window.neo.cmd('play'); // figé en fin de titre : YouTube Music reprend la main
     }
     // Pendant le chargement, on garde l'affichage du morceau demandé (pas l'ancien)
     if (pending && !(pending.videoId && s.videoId === pending.videoId)) { syncButtons(); return; }
@@ -696,6 +709,8 @@
 
   // Suivant / précédent : on suit nous-mêmes la liste affichée, pour ne jamais sortir de la playlist.
   function nextTrack() {
+    // Liste en boucle : après le dernier titre, on repart du premier.
+    if (queue && repeat === 'all' && queue.ids.length && queue.i + 1 >= queue.ids.length) queue.i = -1;
     if (queue && queue.i + 1 < queue.ids.length) {
       queue.i += 1;
       return startPlay({ videoId: queue.ids[queue.i], playlistId: plFor(queue.ids[queue.i]) }, null, { keepQueue: true });
@@ -715,11 +730,31 @@
   for (const id of ['c-play', 'f-play']) $('#' + id).addEventListener('click', toggle);
   for (const id of ['c-prev', 'f-prev']) $('#' + id).addEventListener('click', prevTrack);
   for (const id of ['c-next', 'f-next']) $('#' + id).addEventListener('click', nextTrack);
+
+  const REPEAT_LABEL = { off: 'Répéter : désactivé', all: 'Répéter la liste', one: 'Répéter le titre' };
+  function paintRepeat() {
+    for (const id of ['c-repeat', 'f-repeat']) {
+      const b = $('#' + id);
+      b.classList.toggle('on', repeat !== 'off');
+      b.classList.toggle('one', repeat === 'one');
+      b.title = REPEAT_LABEL[repeat];
+    }
+  }
+  function cycleRepeat() {
+    repeat = REPEAT_MODES[(REPEAT_MODES.indexOf(repeat) + 1) % REPEAT_MODES.length];
+    try { localStorage.setItem('neo.repeat', repeat); } catch (e) {}
+    replayArmed = false;
+    paintRepeat();
+    toast(REPEAT_LABEL[repeat]);
+  }
+  for (const id of ['c-repeat', 'f-repeat']) $('#' + id).addEventListener('click', (e) => { e.stopPropagation(); cycleRepeat(); });
+  paintRepeat();
   $('#p-open').addEventListener('click', () => { if (lastState.title) $('#full').hidden = false; });
   $('#f-close').addEventListener('click', () => ($('#full').hidden = true));
   document.addEventListener('keydown', (e) => {
     if (e.key === 'Escape') { $('#full').hidden = true; closeMenu(); $('#dialog').hidden = true; }
     if (e.code === 'Space' && !/INPUT|TEXTAREA/.test(document.activeElement.tagName)) { e.preventDefault(); toggle(); }
+    if (e.key.toLowerCase() === 'r' && !e.ctrlKey && !e.metaKey && !e.altKey && !/INPUT|TEXTAREA/.test(document.activeElement.tagName)) cycleRepeat();
   });
 
   window.addEventListener('focus', () => { if (!$('#login').hidden && current.name === 'home') render(); });
