@@ -52,10 +52,21 @@
       isPlaying: !!v && !v.paused && !v.ended,
       currentTime: v ? v.currentTime || 0 : 0,
       duration: v && isFinite(v.duration) ? v.duration : 0,
-      volume: v ? v.volume : 1,
+      volume: playerVolume(v),
       hold,
       ended: heldAtEnd || (!!v && v.ended),
     };
+  }
+
+  // Volume réglé dans le lecteur YouTube Music (0 à 1). On ne lit pas celui de la balise vidéo :
+  // YouTube peut le baisser pour égaliser le son des titres, et l'interface croirait à un changement.
+  function playerVolume(v) {
+    try {
+      const mp = document.querySelector('#movie_player');
+      const n = mp && mp.getVolume ? mp.getVolume() : NaN;
+      if (isFinite(n)) return Math.min(1, Math.max(0, n / 100));
+    } catch (e) {}
+    return v ? v.volume : 1;
   }
 
   function publish() {
@@ -73,7 +84,14 @@
     prev() { return click('ytmusic-player-bar .previous-button'); },
     seek(t) { const v = video(); if (v && isFinite(t)) v.currentTime = Math.max(0, t); },
     hold(on) { hold = !!on; if (!hold) heldAtEnd = false; },
-    volume(x) { const v = video(); if (v && isFinite(x)) v.volume = Math.min(1, Math.max(0, x)); },
+    volume(x) {
+      if (!isFinite(x)) return;
+      x = Math.min(1, Math.max(0, x));
+      // Volume du lecteur YouTube Music aussi : sinon il remet le sien au titre suivant.
+      try { const mp = document.querySelector('#movie_player'); if (mp && mp.setVolume) mp.setVolume(Math.round(x * 100)); } catch (e) {}
+      const v = video();
+      if (v) v.volume = x;
+    },
     // Changement de morceau sans recharger la page, si YouTube Music le permet
     open(videoId, playlistId) {
       const app = document.querySelector('ytmusic-app');

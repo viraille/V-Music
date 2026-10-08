@@ -29,6 +29,7 @@ const store = new Store({
     windowMaximized: false,
     lastUrl: null,
     lastPlayback: null, // { videoId, position }
+    volume: null, // volume de l'interface neo (0 à 1), null = jamais réglé
   },
 });
 
@@ -920,7 +921,15 @@ ipcMain.handle('neo:logout', async () => {
 ipcMain.handle('neo:library', (e, kind) => neoApi.library(String(kind || '')));
 ipcMain.handle('neo:getState', () => latestEngineState);
 ipcMain.on('neo:play', (e, target) => neoPlay(target));
+// Volume : gardé dans les réglages (écrit une fois le curseur relâché, pas à chaque pixel).
+let volumeSaveTimer = null;
+function rememberVolume(x) {
+  clearTimeout(volumeSaveTimer);
+  volumeSaveTimer = setTimeout(() => store.set('volume', Math.min(1, Math.max(0, x))), 400);
+}
+ipcMain.handle('neo:getVolume', () => store.get('volume'));
 ipcMain.on('neo:cmd', (e, name, arg) => {
+  if (name === 'volume' && typeof arg === 'number' && Number.isFinite(arg)) rememberVolume(arg);
   if (!NEO_COMMANDS.has(name) || !engineWindow || engineWindow.isDestroyed()) return;
   const a =
     typeof arg === 'number' && Number.isFinite(arg) ? String(arg) : typeof arg === 'boolean' ? String(arg) : '';
@@ -942,7 +951,18 @@ ipcMain.on('engine:state', (event, state) => {
   latestEngineState = state;
   if (muteUntil !== null && state.isPlaying && state.currentTime > 0.2 && state.playerId &&
       (!muteUntil || state.playerId === muteUntil)) {
-    unmuteEngine();
+    // On remet le volume enregistré AVANT de rendre le son (YouTube Music peut avoir le sien,
+    // par exemple après un rechargement de la page) : pas de coup de volume au début du titre.
+    const vol = store.get('volume');
+    if (typeof vol === 'number' && Math.abs((state.volume ?? 1) - vol) > 0.01) {
+      muteUntil = null; // les prochains états ne repassent pas ici
+      engineWindow.webContents
+        .executeJavaScript(`window.__neo && window.__neo.volume(${vol})`)
+        .catch(() => {})
+        .finally(unmuteEngine);
+    } else {
+      unmuteEngine();
+    }
   }
   if (mainWindow && !mainWindow.isDestroyed()) mainWindow.webContents.send('neo:state', state);
 });

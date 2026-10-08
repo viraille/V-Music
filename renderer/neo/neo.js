@@ -37,6 +37,8 @@
   let repeat = 'off';
   try { const r = localStorage.getItem('neo.repeat'); if (REPEAT_MODES.includes(r)) repeat = r; } catch (e) {}
   let replayArmed = false;
+  // Volume choisi par l'utilisateur (0 à 1), gardé dans les réglages de l'appli. null = jamais réglé.
+  let savedVol = null;
 
   // ---------- navigation ----------
   let current = { name: 'home' };
@@ -684,9 +686,13 @@
       $('#t-dur').textContent = $('#f-dur').textContent = timeLeft(s.currentTime, s.duration);
     }
     if (seeking) $('#t-dur').textContent = $('#f-dur').textContent = timeLeft(lastState.currentTime, s.duration);
+    // YouTube Music remet parfois son propre volume (au lancement, à un changement de titre) :
+    // on réapplique celui de l'utilisateur.
+    if (savedVol !== null && s.duration > 0 && Math.abs((s.volume ?? 1) - savedVol) > 0.01) window.neo.cmd('volume', savedVol);
+    const vol = savedVol ?? s.volume ?? 1;
     for (const id of ['vol', 'rail-vol']) {
       const v = $('#' + id);
-      if (document.activeElement !== v) { v.value = Math.round((s.volume ?? 1) * 100); setRange(v, s.volume ?? 1); }
+      if (document.activeElement !== v) { v.value = Math.round(vol * 100); setRange(v, vol); }
     }
 
     if (s.videoId !== prevId) {
@@ -713,7 +719,8 @@
     $('#' + id).addEventListener('input', (e) => {
       const r = e.target.value / 100;
       for (const other of ['vol', 'rail-vol']) { $('#' + other).value = e.target.value; setRange($('#' + other), r); }
-      window.neo.cmd('volume', r);
+      savedVol = r;
+      window.neo.cmd('volume', r); // le processus principal l'enregistre aussi
     });
   }
 
@@ -776,6 +783,12 @@
   window.addEventListener('focus', () => { if (!$('#login').hidden && current.name === 'home') render(); });
   refreshAccount();
   window.neo.onState(onState);
-  window.neo.getState().then((s) => s && onState(s));
+  window.neo.getVolume().then((v) => {
+    if (typeof v === 'number' && v >= 0 && v <= 1 && savedVol === null) {
+      savedVol = v;
+      for (const id of ['vol', 'rail-vol']) { $('#' + id).value = Math.round(v * 100); setRange($('#' + id), v); }
+    }
+    return window.neo.getState();
+  }).catch(() => window.neo.getState()).then((s) => s && onState(s));
   render();
 })();
