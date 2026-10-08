@@ -684,7 +684,10 @@
       $('#t-dur').textContent = $('#f-dur').textContent = timeLeft(s.currentTime, s.duration);
     }
     if (seeking) $('#t-dur').textContent = $('#f-dur').textContent = timeLeft(lastState.currentTime, s.duration);
-    if (document.activeElement !== $('#vol')) { $('#vol').value = Math.round((s.volume ?? 1) * 100); setRange($('#vol'), s.volume ?? 1); }
+    for (const id of ['vol', 'rail-vol']) {
+      const v = $('#' + id);
+      if (document.activeElement !== v) { v.value = Math.round((s.volume ?? 1) * 100); setRange(v, s.volume ?? 1); }
+    }
 
     if (s.videoId !== prevId) {
       document.querySelectorAll('.song').forEach((r) => r.classList.toggle('now', !!s.videoId && r.dataset.vid === s.videoId));
@@ -705,10 +708,23 @@
       setTimeout(() => (seeking = false), 300);
     });
   }
-  $('#vol').addEventListener('input', (e) => { setRange(e.target, e.target.value / 100); window.neo.cmd('volume', e.target.value / 100); });
+  // Deux curseurs de volume (barre du bas + barre latérale) : bouger l'un met l'autre à jour.
+  for (const id of ['vol', 'rail-vol']) {
+    $('#' + id).addEventListener('input', (e) => {
+      const r = e.target.value / 100;
+      for (const other of ['vol', 'rail-vol']) { $('#' + other).value = e.target.value; setRange($('#' + other), r); }
+      window.neo.cmd('volume', r);
+    });
+  }
 
   // Suivant / précédent : on suit nous-mêmes la liste affichée, pour ne jamais sortir de la playlist.
   function nextTrack() {
+    // Titre en boucle : Suivant relance le même morceau depuis le début.
+    if (repeat === 'one' && !pending && lastState.videoId) {
+      replayArmed = false;
+      window.neo.cmd('seek', 0);
+      return window.neo.cmd('play');
+    }
     // Liste en boucle : après le dernier titre, on repart du premier.
     if (queue && repeat === 'all' && queue.ids.length && queue.i + 1 >= queue.ids.length) queue.i = -1;
     if (queue && queue.i + 1 < queue.ids.length) {
