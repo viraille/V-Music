@@ -5,7 +5,7 @@
   "main": "main.js",
   "scripts": {
     "start": "electron .",
-    "dist:win": "electron-builder --win nsis portable --config.win.icon=assets/icon.ico"
+    "dist:win": "node scripts/dist-win.js"
   },
   "dependencies": {
     "@ghostery/adblocker-electron": "^2.18.2",

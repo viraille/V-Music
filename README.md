@@ -35,7 +35,7 @@ npm start
 npm run dist:win
 ```
 
-Outputs an installer and a portable `.exe` to `release/`.
+Outputs an installer and a portable `.exe` to `release/`, versioned with the build date and hour (`YY.MM.DD.HH`, local time), e.g. `V Music Setup 26.10.08.11.exe` — so several builds on the same day never share a version. The script also writes the date into `package.json` and prints the matching GitHub tag (`v26.10.08.11`).
 
 ## Project structure
 
