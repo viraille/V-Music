@@ -75,11 +75,21 @@ const AD_BLOCK_PATTERNS = [
   'get_midroll',
   'ad_break',
   'youtubei/v1/log_event',
-  'youtubei/v1/att/get',
+  // Pas 'youtubei/v1/att/get' : c'est la vérification anti-robot de YouTube, pas une pub.
+  // Bloquée, certains comptes n'ont plus que le premier morceau du titre (~50 s) puis plus de son.
 ];
 
 function isAdRequest(url) {
   return AD_BLOCK_PATTERNS.some((pattern) => url.includes(pattern));
+}
+
+// Jamais bloqué, même par les listes de filtres : le son lui-même (serveurs googlevideo) et la
+// vérification anti-robot de YouTube (att/get + BotGuard sur jnn-pa.googleapis.com). Sans
+// elle, certains comptes n'ont que les ~50 premières secondes du titre.
+const PLAYBACK_ESSENTIAL = ['.googlevideo.com/', '/youtubei/v1/att/', '//jnn-pa.googleapis.com/'];
+
+function isPlaybackEssential(url) {
+  return PLAYBACK_ESSENTIAL.some((part) => url.includes(part));
 }
 
 // --- Bloqueur basé sur des listes de filtres (bibliothèque Ghostery) ---
@@ -368,7 +378,7 @@ function setupAdBlock(ytSession) {
       callback({ cancel: false });
       return;
     }
-    if (!store.get('adBlockEnabled', true)) {
+    if (!store.get('adBlockEnabled', true) || isPlaybackEssential(details.url)) {
       callback({ cancel: false });
       return;
     }
