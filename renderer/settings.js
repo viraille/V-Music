@@ -20,6 +20,7 @@ async function load() {
   document.getElementById('animations').checked = settings.animationsEnabled;
   document.getElementById('splash').checked = settings.splashEnabled !== false;
   document.getElementById('taskbarProgress').checked = settings.taskbarProgressEnabled;
+  document.getElementById('discord').checked = settings.discordEnabled !== false;
 
   document.getElementById('reporting').checked = settings.reportingEnabled;
   document.getElementById('reportingUsername').value = settings.reportingUsername || '';
@@ -29,6 +30,10 @@ async function load() {
   toggleOverlayUrlRow(settings.overlayEnabled);
   if (settings.overlayEnabled) await refreshOverlayUrl();
 }
+
+ipcRenderer.invoke('app:version').then((v) => {
+  document.getElementById('app-version').textContent = 'Version ' + v;
+});
 
 document.getElementById('uiMode').addEventListener('change', (e) => {
   ipcRenderer.send('settings:set', 'uiMode', e.target.value);
@@ -48,6 +53,10 @@ document.getElementById('splash').addEventListener('change', (e) => {
 
 document.getElementById('taskbarProgress').addEventListener('change', (e) => {
   ipcRenderer.send('settings:set', 'taskbarProgressEnabled', e.target.checked);
+});
+
+document.getElementById('discord').addEventListener('change', (e) => {
+  ipcRenderer.send('settings:set', 'discordEnabled', e.target.checked);
 });
 
 document.getElementById('reporting').addEventListener('change', (e) => {

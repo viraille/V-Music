@@ -51,6 +51,7 @@ builder
     config: {
       buildVersion: windowsVersion, // version du fichier .exe
       buildNumber: String(Number(hh)), // 4e nombre de la version produit / de l'installateur
+      extraMetadata: { versionLabel: label }, // version complète affichée dans les paramètres
       win: { icon: 'assets/icon.ico' },
       nsis: { artifactName: `\${productName} Setup ${label}.\${ext}` },
       portable: { artifactName: `\${productName} ${label}.\${ext}` },

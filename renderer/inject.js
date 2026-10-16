@@ -167,6 +167,12 @@
         duration: info.duration,
         currentTime: info.currentTime,
         artwork: info.artwork,
+        // Pour le statut Discord : infos propres du lecteur (la ligne sous le titre
+        // contient aussi l'album, les vues...), et pas de statut pendant une pub.
+        videoId: info.videoId,
+        artist: navigator.mediaSession?.metadata?.artist || '',
+        album: navigator.mediaSession?.metadata?.album || '',
+        isAd: isAdShowing(),
       });
     }
   }

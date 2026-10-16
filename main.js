@@ -6,6 +6,11 @@ const crypto = require('crypto');
 const http = require('http');
 const Store = require('electron-store');
 const browserLogin = require('./neo/browser-login');
+const { createDiscordPresence } = require('./discord');
+
+// Statut Discord : identifiant de l'application « V Music » créée sur
+// discord.com/developers (public, ce n'est pas un secret).
+const DISCORD_CLIENT_ID = '1560696519135592488';
 
 // Dashboard : table Supabase "listening_status", pas de serveur perso à
 // exposer. La clé ici est la clé publique "publishable" (sb_publishable_...),
@@ -21,6 +26,7 @@ const store = new Store({
     overlayEnabled: false,
     overlayPort: 47811,
     reportingEnabled: true,
+    discordEnabled: true, // statut Discord « Écoute ... »
     reportingUsername: os.userInfo().username,
     reportingClientId: null,
     splashEnabled: true,
@@ -241,7 +247,7 @@ function openSettingsWindow() {
   }
   settingsWindow = new BrowserWindow({
     width: 380,
-    height: 590,
+    height: 650,
     resizable: false,
     title: 'Paramètres',
     icon: path.join(__dirname, 'build', 'icon.ico'),
@@ -486,6 +492,12 @@ function createWindow() {
       'utf8'
     );
     win.webContents.executeJavaScript(js).catch(() => {});
+
+    // Barre de volume verticale, seulement sur YouTube Music (pas sur une page Google)
+    if (isMusicUrl(win.webContents.getURL())) {
+      const vol = fs.readFileSync(path.join(__dirname, 'renderer', 'classic-volume.js'), 'utf8');
+      win.webContents.executeJavaScript(vol).catch(() => {});
+    }
   });
 
   win.on('closed', () => {
@@ -928,6 +940,10 @@ function rememberVolume(x) {
   volumeSaveTimer = setTimeout(() => store.set('volume', Math.min(1, Math.max(0, x))), 400);
 }
 ipcMain.handle('neo:getVolume', () => store.get('volume'));
+// Interface classique : sa barre de volume enregistre ici.
+ipcMain.on('volume:save', (e, x) => {
+  if (typeof x === 'number' && Number.isFinite(x)) rememberVolume(x);
+});
 ipcMain.on('neo:cmd', (e, name, arg) => {
   if (name === 'volume' && typeof arg === 'number' && Number.isFinite(arg)) rememberVolume(arg);
   if (!NEO_COMMANDS.has(name) || !engineWindow || engineWindow.isDestroyed()) return;
@@ -969,6 +985,12 @@ ipcMain.on('engine:state', (event, state) => {
 
 // ---------- IPC ----------
 ipcMain.handle('settings:get', () => store.store);
+// Version affichée dans les paramètres : AA.MM.JJ.HH, ajoutée au package.json de l'appli par
+// scripts/dist-win.js (versionLabel). En dev, il n'y a que la date.
+ipcMain.handle('app:version', () => {
+  const label = require('./package.json').versionLabel;
+  return app.isPackaged ? label || app.getVersion() : `${app.getVersion()} (dev)`;
+});
 
 ipcMain.on('settings:set', (event, key, value) => {
   store.set(key, value);
@@ -976,6 +998,7 @@ ipcMain.on('settings:set', (event, key, value) => {
   if (key === 'taskbarProgressEnabled' && !value && mainWindow) {
     mainWindow.setProgressBar(-1);
   }
+  if (key === 'discordEnabled') discordPresence.setEnabled(value);
   if (key === 'overlayEnabled') {
     if (value) startOverlayServer();
     else stopOverlayServer();
@@ -998,9 +1021,12 @@ ipcMain.on('progress:update', (event, ratio, isPlaying) => {
   mainWindow.setProgressBar(value, { mode: isPlaying ? 'normal' : 'paused' });
 });
 
+const discordPresence = createDiscordPresence(DISCORD_CLIENT_ID);
+
 ipcMain.on('report:send', (event, state) => {
   sendReport(state);
   broadcastOverlayState(state);
+  if (state && !state.isAd) discordPresence.update(state);
 });
 
 ipcMain.handle('report:getClientId', () => store.get('reportingClientId'));
@@ -1028,6 +1054,7 @@ app.whenReady().then(() => {
   if (store.get('uiMode', 'neo') === 'neo') createNeoWindow();
   else createWindow();
   if (store.get('overlayEnabled', false)) startOverlayServer();
+  discordPresence.setEnabled(store.get('discordEnabled', true));
   setInterval(flushPlayback, 5000);
 
   app.on('activate', () => {
@@ -1047,6 +1074,7 @@ app.on('before-quit', () => {
   flushPlayback();
   if (mainWindow && !mainWindow.isDestroyed()) mainWindow.setProgressBar(-1);
   stopOverlayServer();
+  discordPresence.stop();
   // Signale l'arrêt tout de suite plutôt que d'attendre le timeout côté
   // serveur. Best-effort : on ne bloque pas la fermeture si ça échoue.
   lastReportSentAt = 0; // force l'envoi malgré le throttle

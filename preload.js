@@ -22,6 +22,10 @@ window.__ytmcSendReport = (state) => ipcRenderer.send('report:send', state);
 window.__ytmcSavePlayback = (state) => ipcRenderer.send('playback:save', state);
 window.__ytmcGetResume = () => ipcRenderer.invoke('playback:getResume');
 
+// Volume enregistré dans les réglages (le même pour les deux interfaces), 0 à 1.
+window.__ytmcGetVolume = () => ipcRenderer.invoke('neo:getVolume');
+window.__ytmcSaveVolume = (x) => ipcRenderer.send('volume:save', x);
+
 // Nouvelle interface : le moteur caché publie son état de lecture.
 window.__ytmcEngineState = (state) => ipcRenderer.send('engine:state', state);
 

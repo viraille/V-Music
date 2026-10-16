@@ -25,3 +25,70 @@ ytmusic-mealbar-promo-renderer,
 #ytmc-settings-btn:hover {
   background: rgba(255, 255, 255, 0.08);
 }
+
+/* Barre de volume verticale (classic-volume.js), en bas de la colonne de gauche.
+   C'est un curseur horizontal tourné d'un quart de tour. */
+#ytmc-vol {
+  position: fixed;
+  left: 0;
+  bottom: 90px;
+  width: 72px;
+  z-index: 5; /* au-dessus de la colonne de gauche de YouTube Music (z-index 4) */
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 6px;
+  color: #9a9aa8;
+}
+#ytmc-vol[hidden] {
+  display: none;
+}
+#ytmc-vol:hover {
+  color: #ececf1;
+}
+#ytmc-vol .track {
+  position: relative;
+  width: 26px;
+  height: 110px;
+}
+#ytmc-vol input {
+  -webkit-appearance: none;
+  appearance: none;
+  position: absolute;
+  left: 50%;
+  top: 50%;
+  width: 110px;
+  height: 18px;
+  margin: 0;
+  background: transparent;
+  cursor: pointer;
+  outline: none;
+  transform: translate(-50%, -50%) rotate(-90deg);
+  --p: 100%;
+}
+#ytmc-vol input::-webkit-slider-runnable-track {
+  height: 6px;
+  border-radius: 6px;
+  background: linear-gradient(to right, #5cd0f0 var(--p), #282832 var(--p));
+}
+#ytmc-vol input::-webkit-slider-thumb {
+  -webkit-appearance: none;
+  width: 14px;
+  height: 14px;
+  margin-top: -4px;
+  border-radius: 50%;
+  background: #ececf1;
+  transform: scale(0);
+  transition: transform 0.12s;
+}
+#ytmc-vol input:hover::-webkit-slider-thumb {
+  transform: scale(1);
+}
+#ytmc-vol svg {
+  width: 20px;
+  height: 20px;
+  fill: currentColor;
+}
+#ytmc-vol.muted svg {
+  opacity: 0.4;
+}
