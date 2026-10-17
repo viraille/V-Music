@@ -1,6 +1,6 @@
 {
   "name": "V-Music",
-  "version": "26.10.16",
+  "version": "26.10.17",
   "description": "Client desktop YouTube Music maison, avec bloqueur de pub réseau et interface custom",
   "main": "main.js",
   "scripts": {

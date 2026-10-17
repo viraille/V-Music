@@ -15,34 +15,89 @@ const path = require('path');
 const http = require('http');
 const net = require('net');
 const crypto = require('crypto');
-const { spawn } = require('child_process');
+const { spawn, execFileSync } = require('child_process');
 
 const PROFILE_PREFIX = 'vmusic-login-';
 
-function findBrowser() {
+// Emplacement déclaré dans le registre Windows (« App Paths »), là où l'installeur du
+// navigateur l'a mis, même hors des dossiers habituels.
+function registryAppPath(exeName) {
+  const keys = [
+    'HKCU\\SOFTWARE\\Microsoft\\Windows\\CurrentVersion\\App Paths\\',
+    'HKLM\\SOFTWARE\\Microsoft\\Windows\\CurrentVersion\\App Paths\\',
+    'HKLM\\SOFTWARE\\WOW6432Node\\Microsoft\\Windows\\CurrentVersion\\App Paths\\',
+  ];
+  const found = [];
+  for (const k of keys) {
+    try {
+      const out = execFileSync('reg', ['query', k + exeName, '/ve'], {
+        encoding: 'utf8',
+        windowsHide: true,
+        timeout: 3000,
+        stdio: ['ignore', 'pipe', 'ignore'],
+      });
+      const m = out.match(/REG_(?:EXPAND_)?SZ\s+(.+)/);
+      if (m) found.push(m[1].trim().replace(/^"|"$/g, '').replace(/%([^%]+)%/g, (_, v) => process.env[v] || ''));
+    } catch (e) {
+      // clé absente : navigateur pas installé de cette façon
+    }
+  }
+  return found;
+}
+
+// Navigateurs compatibles (Chromium : Edge, Chrome, Brave, Vivaldi, Chromium) trouvés sur
+// ce PC, dans l'ordre où on les essaie.
+function findBrowsers() {
   const env = process.env;
-  const list =
-    process.platform === 'win32'
-      ? [
-          env['PROGRAMFILES(X86)'] && path.join(env['PROGRAMFILES(X86)'], 'Microsoft', 'Edge', 'Application', 'msedge.exe'),
-          env.PROGRAMFILES && path.join(env.PROGRAMFILES, 'Microsoft', 'Edge', 'Application', 'msedge.exe'),
-          env.PROGRAMFILES && path.join(env.PROGRAMFILES, 'Google', 'Chrome', 'Application', 'chrome.exe'),
-          env['PROGRAMFILES(X86)'] && path.join(env['PROGRAMFILES(X86)'], 'Google', 'Chrome', 'Application', 'chrome.exe'),
-          env.LOCALAPPDATA && path.join(env.LOCALAPPDATA, 'Google', 'Chrome', 'Application', 'chrome.exe'),
-        ]
-      : process.platform === 'darwin'
-      ? [
-          '/Applications/Google Chrome.app/Contents/MacOS/Google Chrome',
-          '/Applications/Microsoft Edge.app/Contents/MacOS/Microsoft Edge',
-        ]
-      : ['/usr/bin/google-chrome', '/usr/bin/google-chrome-stable', '/usr/bin/microsoft-edge', '/usr/bin/chromium', '/usr/bin/chromium-browser'];
-  return list.filter(Boolean).find((p) => {
+  let list;
+  if (process.platform === 'win32') {
+    const pf = env.PROGRAMFILES;
+    const pf86 = env['PROGRAMFILES(X86)'];
+    const local = env.LOCALAPPDATA;
+    const at = (base, ...p) => base && path.join(base, ...p);
+    list = [
+      at(pf86, 'Microsoft', 'Edge', 'Application', 'msedge.exe'),
+      at(pf, 'Microsoft', 'Edge', 'Application', 'msedge.exe'),
+      at(local, 'Microsoft', 'Edge', 'Application', 'msedge.exe'),
+      ...registryAppPath('msedge.exe'),
+      at(pf, 'Google', 'Chrome', 'Application', 'chrome.exe'),
+      at(pf86, 'Google', 'Chrome', 'Application', 'chrome.exe'),
+      at(local, 'Google', 'Chrome', 'Application', 'chrome.exe'),
+      ...registryAppPath('chrome.exe'),
+      at(pf, 'BraveSoftware', 'Brave-Browser', 'Application', 'brave.exe'),
+      at(pf86, 'BraveSoftware', 'Brave-Browser', 'Application', 'brave.exe'),
+      at(local, 'BraveSoftware', 'Brave-Browser', 'Application', 'brave.exe'),
+      ...registryAppPath('brave.exe'),
+      at(local, 'Vivaldi', 'Application', 'vivaldi.exe'),
+      at(pf, 'Vivaldi', 'Application', 'vivaldi.exe'),
+      ...registryAppPath('vivaldi.exe'),
+      at(local, 'Chromium', 'Application', 'chrome.exe'),
+    ];
+  } else if (process.platform === 'darwin') {
+    list = [
+      '/Applications/Google Chrome.app/Contents/MacOS/Google Chrome',
+      '/Applications/Microsoft Edge.app/Contents/MacOS/Microsoft Edge',
+      '/Applications/Brave Browser.app/Contents/MacOS/Brave Browser',
+    ];
+  } else {
+    list = ['/usr/bin/google-chrome', '/usr/bin/google-chrome-stable', '/usr/bin/microsoft-edge', '/usr/bin/brave-browser', '/usr/bin/chromium', '/usr/bin/chromium-browser'];
+  }
+  const seen = new Set();
+  return list.filter((p) => {
+    if (!p) return false;
+    const key = path.resolve(p).toLowerCase();
+    if (seen.has(key)) return false;
+    seen.add(key);
     try {
       return fs.statSync(p).isFile();
     } catch (e) {
       return false;
     }
   });
+}
+
+function findBrowser() {
+  return findBrowsers()[0];
 }
 
 // ---------- Client WebSocket minimal (texte uniquement) ----------
@@ -340,8 +395,9 @@ async function runExternalLogin({ exe, url, timeoutMs = 15 * 60 * 1000, onStatus
     });
 
     // Dès que le navigateur est prêt, son port DevTools répond avec l'adresse de pilotage.
+    // (jusqu'à ~30 s : le tout premier lancement sur un PC neuf peut être lent)
     let wsUrl = null;
-    for (let i = 0; i < 100 && !wsUrl; i++) {
+    for (let i = 0; i < 150 && !wsUrl; i++) {
       if (exited) throw fail('launch', "le navigateur s'est arrêté");
       try {
         const info = await httpJson(`http://127.0.0.1:${debugPort}/json/version`);
@@ -385,4 +441,4 @@ async function runExternalLogin({ exe, url, timeoutMs = 15 * 60 * 1000, onStatus
   }
 }
 
-module.exports = { findBrowser, runExternalLogin, toElectronCookie, isLoggedIn, cleanupOldProfiles, wsConnect, cdpConnect, PROFILE_PREFIX };
+module.exports = { findBrowser, findBrowsers, runExternalLogin, toElectronCookie, isLoggedIn, cleanupOldProfiles, wsConnect, cdpConnect, PROFILE_PREFIX };

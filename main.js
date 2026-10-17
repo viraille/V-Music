@@ -1,4 +1,4 @@
-const { app, BrowserWindow, WebContentsView, session, ipcMain, screen, shell } = require('electron');
+const { app, BrowserWindow, WebContentsView, session, ipcMain, screen, shell, dialog } = require('electron');
 const path = require('path');
 const fs = require('fs');
 const os = require('os');
@@ -474,6 +474,7 @@ function createWindow() {
   };
   win.webContents.on('did-navigate', rememberUrl);
   win.webContents.on('did-navigate-in-page', rememberUrl);
+  redirectSignInToBrowser(win.webContents);
 
   // Empêche YouTube Music de bloquer la fermeture de la fenêtre avec un
   // prompt natif "Quitter le site ?" quand une musique est en cours de
@@ -560,6 +561,30 @@ function notifyLogin() {
   if (mainWindow && !mainWindow.isDestroyed()) mainWindow.webContents.send('neo:login-done');
 }
 
+// Bouton « Se connecter » de YouTube (page de consentement, site YouTube Music) : Google refuse
+// la connexion dans une fenêtre de l'appli. Dès qu'on arriverait sur une page où Google demande
+// l'identifiant ou le compte (par un clic ou par une redirection), on annule et on passe par
+// Edge / Chrome, comme le bouton de l'appli. Les passages automatiques de YouTube par
+// accounts.google.com/ServiceLogin (cookies, consentement, session) ne sont pas touchés :
+// ils n'affichent jamais ces pages.
+function isGoogleSignInPage(url) {
+  return /^https:\/\/accounts\.google\.com\/(v3\/signin|signin|AccountChooser|InteractiveLogin)/i.test(url);
+}
+function redirectSignInToBrowser(wc) {
+  const intercept = (e, url, isMainFrame) => {
+    if (isMainFrame === false || !isGoogleSignInPage(url)) return;
+    e.preventDefault();
+    openLogin();
+  };
+  wc.on('will-navigate', (e, url) => intercept(e, url, true));
+  wc.on('will-redirect', (e, url, isInPlace, isMainFrame) => intercept(e, url, isMainFrame));
+  wc.setWindowOpenHandler(({ url }) => {
+    if (!isGoogleSignInPage(url)) return { action: 'allow' };
+    openLogin();
+    return { action: 'deny' };
+  });
+}
+
 // Identité "Chrome" complète et cohérente : l'en-tête User-Agent, les indices client
 // (sec-ch-ua) et navigator.userAgentData disent tous la même chose. Google refuse
 // les navigateurs dont ces éléments se contredisent ou trahissent Electron.
@@ -627,6 +652,10 @@ function afterLogin() {
     engineWindow.webContents.once('did-finish-load', () => setTimeout(notifyLogin, 300));
     engineWindow.webContents.loadURL(MUSIC_ORIGIN);
   } else {
+    // Interface classique : la fenêtre principale est le site, on la recharge connectée.
+    if (store.get('uiMode', 'neo') === 'classic' && mainWindow && !mainWindow.isDestroyed()) {
+      mainWindow.webContents.loadURL(MUSIC_ORIGIN);
+    }
     notifyLogin();
   }
 }
@@ -644,27 +673,53 @@ async function importGoogleCookies(cookies) {
   return list.length;
 }
 
-function openLogin() {
+async function openLogin() {
   if (loginBusy) return;
-  const exe = browserLogin.findBrowser();
-  if (!exe) {
-    openEmbeddedLogin();
-    return;
-  }
   loginBusy = true;
-  browserLogin
-    .runExternalLogin({ exe, url: LOGIN_URL })
-    .then(async (cookies) => {
-      const n = await importGoogleCookies(cookies);
-      if (n) afterLogin();
-    })
-    .catch((e) => {
-      // Fenêtre fermée / délai dépassé : rien à faire. Navigateur inutilisable : secours.
-      if (e && e.code === 'launch') openEmbeddedLogin();
-    })
-    .finally(() => {
-      loginBusy = false;
-    });
+  const browsers = browserLogin.findBrowsers();
+  const problems = [];
+  try {
+    // On essaie chaque navigateur trouvé, jusqu'à ce que l'un d'eux démarre.
+    for (const exe of browsers) {
+      try {
+        const cookies = await browserLogin.runExternalLogin({ exe, url: LOGIN_URL });
+        const n = await importGoogleCookies(cookies);
+        if (n) afterLogin();
+        return;
+      } catch (e) {
+        // Fenêtre fermée / délai dépassé : l'utilisateur a abandonné, rien à faire.
+        if (!e || e.code !== 'launch') return;
+        problems.push(`${path.basename(exe)} : ${e.message}`);
+      }
+    }
+  } finally {
+    loginBusy = false;
+  }
+  offerEmbeddedLogin(browsers.length > 0, problems);
+}
+
+// Aucun navigateur utilisable : on explique plutôt que d'ouvrir directement la fenêtre
+// intégrée, que Google refuse presque toujours (« ce navigateur ... pas sécurisés »).
+async function offerEmbeddedLogin(hadBrowser, problems) {
+  const opts = {
+    type: 'warning',
+    title: 'Connexion à Google',
+    message: hadBrowser
+      ? "Impossible d'ouvrir ton navigateur pour la connexion."
+      : 'Il faut Microsoft Edge ou Google Chrome pour se connecter.',
+    detail:
+      'Google refuse les connexions faites directement dans V Music : la connexion passe par ' +
+      'Edge, Chrome ou Brave. Installe ou mets à jour l’un d’eux, puis réessaie.\n\n' +
+      'Tu peux quand même essayer la fenêtre intégrée, mais Google la refuse le plus souvent.' +
+      (problems.length ? `\n\nDétail : ${problems.join(' ; ')}` : ''),
+    buttons: ['Essayer quand même', 'Annuler'],
+    defaultId: 1,
+    cancelId: 1,
+    noLink: true,
+  };
+  const parent = mainWindow && !mainWindow.isDestroyed() ? mainWindow : null;
+  const { response } = parent ? await dialog.showMessageBox(parent, opts) : await dialog.showMessageBox(opts);
+  if (response === 0) openEmbeddedLogin();
 }
 
 // Secours (aucun Edge/Chrome trouvé) : fenêtre intégrée, que Google peut refuser.
@@ -784,6 +839,8 @@ function createEngineWindow(ytSession) {
   eng.webContents.on('did-navigate', rememberUrl);
   eng.webContents.on('did-navigate-in-page', rememberUrl);
   eng.webContents.on('will-prevent-unload', (event) => event.preventDefault());
+  // La page de consentement reste affichée : on peut encore y répondre si on abandonne la connexion.
+  redirectSignInToBrowser(eng.webContents);
 
   eng.webContents.on('did-finish-load', () => {
     engineLoadedOnce = true;
