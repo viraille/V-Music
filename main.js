@@ -7,6 +7,7 @@ const http = require('http');
 const Store = require('electron-store');
 const browserLogin = require('./neo/browser-login');
 const { createDiscordPresence } = require('./discord');
+const velvetone = require('./velvetone');
 
 // Statut Discord : identifiant de l'application « V Music » créée sur
 // discord.com/developers (public, ce n'est pas un secret).
@@ -27,6 +28,7 @@ const store = new Store({
     overlayPort: 47811,
     reportingEnabled: true,
     discordEnabled: true, // statut Discord « Écoute ... »
+    velvetoneEnabled: true, // extension Velvetone du Chrome de ce PC (interface classique)
     reportingUsername: os.userInfo().username,
     reportingClientId: null,
     splashEnabled: true,
@@ -38,6 +40,20 @@ const store = new Store({
     volume: null, // volume de l'interface neo (0 à 1), null = jamais réglé
   },
 });
+
+// Une seule V Music à la fois : deux instances sur les mêmes données se disputent la base des
+// cookies, et la connexion se perd. Si une tourne déjà, on lui passe la main.
+const gotSingleInstanceLock = app.requestSingleInstanceLock();
+if (!gotSingleInstanceLock) {
+  app.quit();
+} else {
+  app.on('second-instance', () => {
+    if (!mainWindow || mainWindow.isDestroyed()) return;
+    if (mainWindow.isMinimized()) mainWindow.restore();
+    mainWindow.show();
+    mainWindow.focus();
+  });
+}
 
 // ID stable qui identifie ce poste auprès du dashboard, généré une seule
 // fois puis conservé sur disque.
@@ -257,7 +273,7 @@ function openSettingsWindow() {
   }
   settingsWindow = new BrowserWindow({
     width: 380,
-    height: 650,
+    height: 740,
     resizable: false,
     title: 'Paramètres',
     icon: path.join(__dirname, 'build', 'icon.ico'),
@@ -365,6 +381,22 @@ function attachSplash(win) {
   return remove;
 }
 
+// ---------- Cookies de connexion toujours enregistrés ----------
+// Google renouvelle souvent un cookie de connexion. Si l'appli s'arrête brutalement (plantage,
+// PC éteint, fin de tâche) avant que le nouveau soit écrit sur le disque, Google voit l'ancien
+// au lancement suivant et déconnecte par sécurité. On écrit donc dès qu'un cookie Google /
+// YouTube change (regroupé sur 2 s), et en quittant.
+let cookieFlushTimer = null;
+function keepCookiesSaved(ses) {
+  const flush = () => ses.cookies.flushStore().catch(() => {});
+  ses.cookies.on('changed', (e, cookie) => {
+    if (!/(^|\.)(youtube\.com|google\.[a-z.]+)$/i.test((cookie.domain || '').replace(/^\./, ''))) return;
+    clearTimeout(cookieFlushTimer);
+    cookieFlushTimer = setTimeout(flush, 2000);
+  });
+  app.on('before-quit', flush);
+}
+
 // ---------- Blocage des pubs sur la session YouTube Music ----------
 let adBlockInstalled = false;
 let loginWindow = null;
@@ -407,6 +439,79 @@ function setupAdBlock(ytSession) {
   });
 }
 
+// ---------- Extension Velvetone (interface classique uniquement) ----------
+// Reprise du Chrome de ce PC, jamais incluse dans l'appli (voir velvetone.js). Jamais chargée
+// avec la nouvelle interface : elle tournerait dans le moteur caché et gênerait notre file.
+let velvetoneState = { found: false, loaded: false, version: '', error: '' };
+
+// Les extensions se gèrent par session.extensions depuis Electron 36.
+const extensionsOf = (ses) => ses.extensions || ses;
+
+async function loadVelvetone(ses) {
+  try {
+    const prep = velvetone.prepare(app.getPath('userData'));
+    if (!prep) {
+      velvetoneState = { found: false, loaded: false, version: '', error: '' };
+      return;
+    }
+    velvetoneState = { found: true, loaded: false, version: prep.version, error: '' };
+    const exts = extensionsOf(ses);
+    if (!exts.getExtension(velvetone.VELVETONE_ID)) {
+      const timeout = new Promise((_, reject) => setTimeout(() => reject(new Error('délai dépassé')), 8000));
+      await Promise.race([exts.loadExtension(prep.dir), timeout]);
+    }
+    velvetoneState.loaded = true;
+  } catch (e) {
+    velvetoneState = { ...velvetoneState, loaded: false, error: e.message };
+    console.error('Velvetone :', e.message);
+  }
+}
+
+async function setVelvetoneEnabled(on) {
+  if (store.get('uiMode', 'neo') !== 'classic' || !mainWindow || mainWindow.isDestroyed()) return;
+  const ses = session.fromPartition('persist:ytmusic-custom');
+  if (on) {
+    await loadVelvetone(ses);
+  } else {
+    try {
+      const exts = extensionsOf(ses);
+      if (exts.getExtension(velvetone.VELVETONE_ID)) exts.removeExtension(velvetone.VELVETONE_ID);
+    } catch (e) {}
+    velvetoneState.loaded = false;
+  }
+  mainWindow.webContents.reload();
+}
+
+let velvetoneSettingsWindow = null;
+function openVelvetoneSettings() {
+  if (!velvetoneState.loaded) return;
+  if (velvetoneSettingsWindow && !velvetoneSettingsWindow.isDestroyed()) {
+    velvetoneSettingsWindow.focus();
+    return;
+  }
+  velvetoneSettingsWindow = new BrowserWindow({
+    width: 380,
+    height: 640,
+    resizable: false,
+    title: 'Réglages Velvetone',
+    backgroundColor: '#0a0a0d',
+    icon: path.join(__dirname, 'build', 'icon.ico'),
+    autoHideMenuBar: true,
+    parent: settingsWindow || mainWindow || undefined,
+    webPreferences: { session: session.fromPartition('persist:ytmusic-custom') },
+  });
+  velvetoneSettingsWindow.loadURL(`chrome-extension://${velvetone.VELVETONE_ID}/popup.html`);
+  velvetoneSettingsWindow.on('closed', () => {
+    velvetoneSettingsWindow = null;
+  });
+}
+
+// Google refuse la connexion dans un navigateur qui se déclare "Electron", et YouTube Music sert
+// alors un site dégradé (icônes absentes) : on présente la même identité que Chrome.
+function setChromeIdentity(wc) {
+  wc.setUserAgent(wc.getUserAgent().replace(/\s(Electron|ytmusic-custom|v-music)\/\S+/gi, ''));
+}
+
 // ---------- Fenêtre principale ----------
 function createWindow() {
   const useSplash = store.get('splashEnabled', true);
@@ -434,6 +539,7 @@ function createWindow() {
   });
 
   mainWindow = win;
+  setChromeIdentity(win.webContents);
   if (store.get('windowMaximized', false)) win.maximize();
 
   // Animation de lancement par-dessus la page, retirée quand YouTube Music est chargé
@@ -464,9 +570,13 @@ function createWindow() {
   });
 
   // On rouvre la dernière page de YouTube Music visitée plutôt que
-  // l'accueil.
+  // l'accueil. Velvetone (si activée) est chargée AVANT la page, pour que
+  // ses scripts démarrent avec elle.
   const lastUrl = store.get('lastUrl');
-  win.loadURL(isMusicUrl(lastUrl) ? lastUrl : MUSIC_ORIGIN);
+  const ready = store.get('velvetoneEnabled', true) ? loadVelvetone(ytSession) : Promise.resolve();
+  ready.finally(() => {
+    if (!win.isDestroyed()) win.loadURL(isMusicUrl(lastUrl) ? lastUrl : MUSIC_ORIGIN);
+  });
 
   const rememberUrl = (event, url, isMainFrame) => {
     if (isMainFrame === false) return;
@@ -576,8 +686,11 @@ function redirectSignInToBrowser(wc) {
     e.preventDefault();
     openLogin();
   };
-  wc.on('will-navigate', (e, url) => intercept(e, url, true));
-  wc.on('will-redirect', (e, url, isInPlace, isMainFrame) => intercept(e, url, isMainFrame));
+  // Les infos sont sur l'événement lui-même (les anciens arguments séparés sont dépréciés).
+  wc.on('will-navigate', (e, url) => intercept(e, e.url || url, e.isMainFrame !== false));
+  wc.on('will-redirect', (e, url, isInPlace, isMainFrame) =>
+    intercept(e, e.url || url, typeof e.isMainFrame === 'boolean' ? e.isMainFrame : isMainFrame)
+  );
   wc.setWindowOpenHandler(({ url }) => {
     if (!isGoogleSignInPage(url)) return { action: 'allow' };
     openLogin();
@@ -807,11 +920,7 @@ function createEngineWindow(ytSession) {
   });
   engineWindow = eng;
 
-  // Google refuse la connexion dans un navigateur qui se déclare "Electron" :
-  // on présente la même identité que Chrome.
-  eng.webContents.setUserAgent(
-    eng.webContents.getUserAgent().replace(/\s(Electron|ytmusic-custom|v-music)\/\S+/gi, '')
-  );
+  setChromeIdentity(eng.webContents);
 
   const lastUrl = store.get('lastUrl');
   eng.loadURL(isMusicUrl(lastUrl) ? lastUrl : MUSIC_ORIGIN);
@@ -1054,6 +1163,20 @@ ipcMain.on('engine:state', (event, state) => {
 ipcMain.handle('settings:get', () => store.store);
 // Version affichée dans les paramètres : AA.MM.JJ.HH, ajoutée au package.json de l'appli par
 // scripts/dist-win.js (versionLabel). En dev, il n'y a que la date.
+// Velvetone, pour la fenêtre des paramètres (ligne visible seulement en interface classique)
+ipcMain.handle('velvetone:status', () => {
+  const s = { ...velvetoneState, running: store.get('uiMode', 'neo') === 'classic' };
+  if (!s.found) {
+    const installed = velvetone.findInstalled();
+    if (installed) {
+      s.found = true;
+      s.version = installed.version.replace(/_\d+$/, '');
+    }
+  }
+  return s;
+});
+ipcMain.on('velvetone:openSettings', () => openVelvetoneSettings());
+
 ipcMain.handle('app:version', () => {
   const label = require('./package.json').versionLabel;
   return app.isPackaged ? label || app.getVersion() : `${app.getVersion()} (dev)`;
@@ -1066,6 +1189,7 @@ ipcMain.on('settings:set', (event, key, value) => {
     mainWindow.setProgressBar(-1);
   }
   if (key === 'discordEnabled') discordPresence.setEnabled(value);
+  if (key === 'velvetoneEnabled') setVelvetoneEnabled(value);
   if (key === 'overlayEnabled') {
     if (value) startOverlayServer();
     else stopOverlayServer();
@@ -1114,10 +1238,12 @@ ipcMain.handle('playback:getResume', () => {
 
 // ---------- Cycle de vie ----------
 app.whenReady().then(() => {
+  if (!gotSingleInstanceLock) return; // une autre V Music tourne déjà : on s'arrête
   // Sans await : la fenêtre s'ouvre tout de suite, les listes s'activent dès
   // qu'elles sont prêtes.
   initListBlocker();
   browserLogin.cleanupOldProfiles(); // profils temporaires de connexion oubliés (cookies)
+  keepCookiesSaved(session.fromPartition('persist:ytmusic-custom'));
   if (store.get('uiMode', 'neo') === 'neo') createNeoWindow();
   else createWindow();
   if (store.get('overlayEnabled', false)) startOverlayServer();
@@ -1137,6 +1263,7 @@ app.on('window-all-closed', () => {
 });
 
 app.on('before-quit', () => {
+  if (!gotSingleInstanceLock) return; // instance en double : ne touche à rien de l'autre
   appQuitting = true;
   flushPlayback();
   if (mainWindow && !mainWindow.isDestroyed()) mainWindow.setProgressBar(-1);

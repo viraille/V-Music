@@ -59,6 +59,8 @@
     const g = guide && guide.getBoundingClientRect();
     const guideOpen = !!g && g.width > 100 && g.left >= 0;
     box.hidden = !(m && m.width > 0 && m.left >= 0) || guideOpen || innerHeight < 520;
+    // Tant qu'elle est visible, le volume de la barre de lecture fait doublon (base.css le masque)
+    document.documentElement.classList.toggle('ytmc-vol-on', !box.hidden);
     // Juste au-dessus de la barre de lecture
     const bar = document.querySelector('ytmusic-player-bar');
     const b = bar && bar.getBoundingClientRect();

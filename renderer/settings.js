@@ -21,6 +21,8 @@ async function load() {
   document.getElementById('splash').checked = settings.splashEnabled !== false;
   document.getElementById('taskbarProgress').checked = settings.taskbarProgressEnabled;
   document.getElementById('discord').checked = settings.discordEnabled !== false;
+  document.getElementById('velvetone').checked = settings.velvetoneEnabled !== false;
+  refreshVelvetone();
 
   document.getElementById('reporting').checked = settings.reportingEnabled;
   document.getElementById('reportingUsername').value = settings.reportingUsername || '';
@@ -31,12 +33,42 @@ async function load() {
   if (settings.overlayEnabled) await refreshOverlayUrl();
 }
 
+// Velvetone : seulement avec l'interface classique
+async function refreshVelvetone() {
+  const classic = document.getElementById('uiMode').value === 'classic';
+  document.getElementById('velvetone-row').style.display = classic ? 'block' : 'none';
+  if (!classic) return;
+  const s = await ipcRenderer.invoke('velvetone:status');
+  const on = document.getElementById('velvetone').checked;
+  let text;
+  if (!s.found) text = "Installe l'extension Velvetone dans Chrome pour l'utiliser ici";
+  else if (!s.running) text = `Trouvée (v${s.version}) : redémarre l'appli pour l'activer`;
+  else if (s.loaded) text = `Active (v${s.version}, reprise de ton Chrome)`;
+  else if (s.error) text = `Impossible de la charger : ${s.error}`;
+  else text = on ? `Trouvée (v${s.version})` : `Désactivée (v${s.version} trouvée dans Chrome)`;
+  document.getElementById('velvetone-status').textContent = text;
+  document.getElementById('velvetone').disabled = !s.found;
+  document.getElementById('velvetone-settings-row').style.display = s.loaded && on ? 'flex' : 'none';
+}
+
+document.getElementById('velvetone').addEventListener('change', (e) => {
+  ipcRenderer.send('settings:set', 'velvetoneEnabled', e.target.checked);
+  // le chargement / retrait prend un instant
+  setTimeout(refreshVelvetone, 800);
+  setTimeout(refreshVelvetone, 2500);
+});
+
+document.getElementById('velvetone-settings').addEventListener('click', () => {
+  ipcRenderer.send('velvetone:openSettings');
+});
+
 ipcRenderer.invoke('app:version').then((v) => {
   document.getElementById('app-version').textContent = 'Version ' + v;
 });
 
 document.getElementById('uiMode').addEventListener('change', (e) => {
   ipcRenderer.send('settings:set', 'uiMode', e.target.value);
+  refreshVelvetone();
 });
 
 document.getElementById('adBlock').addEventListener('change', (e) => {

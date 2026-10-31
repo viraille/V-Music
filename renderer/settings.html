@@ -119,6 +119,27 @@
     </select>
   </div>
 
+  <!-- Interface classique uniquement : affichée par settings.js -->
+  <div id="velvetone-row" style="display:none;">
+    <div class="row">
+      <div>
+        <div class="label">Velvetone</div>
+        <div class="desc" id="velvetone-status">Thème de l'extension Chrome Velvetone</div>
+      </div>
+      <label class="switch">
+        <input type="checkbox" id="velvetone" />
+        <span class="slider"></span>
+      </label>
+    </div>
+    <div class="row" id="velvetone-settings-row" style="display:none;">
+      <div class="desc">Couleurs, lecture, paroles…</div>
+      <button
+        id="velvetone-settings"
+        style="border:none; border-radius:8px; background:var(--accent); color:white; font-size:12px; padding:7px 12px; cursor:pointer;"
+      >Réglages Velvetone</button>
+    </div>
+  </div>
+
   <div class="row">
     <div>
       <div class="label">Bloqueur de pub</div>

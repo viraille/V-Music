@@ -1,6 +1,6 @@
 {
   "name": "V-Music",
-  "version": "26.10.17",
+  "version": "26.10.31",
   "description": "Client desktop YouTube Music maison, avec bloqueur de pub réseau et interface custom",
   "main": "main.js",
   "scripts": {
@@ -12,8 +12,8 @@
     "electron-store": "^8.1.0"
   },
   "devDependencies": {
-    "electron": "^31.0.0",
-    "electron-builder": "^24.13.3"
+    "electron": "^44.10.1",
+    "electron-builder": "^26.18.0"
   },
   "build": {
     "appId": "com.custom.ytmusic",
@@ -25,6 +25,7 @@
       "main.js",
       "preload.js",
       "discord.js",
+      "velvetone.js",
       "neo/**/*",
       "renderer/**/*",
       "package.json"

@@ -92,3 +92,38 @@ ytmusic-mealbar-promo-renderer,
 #ytmc-vol.muted svg {
   opacity: 0.4;
 }
+/* Notre barre de volume est visible : celle de la barre de lecture (à droite) fait doublon */
+html.ytmc-vol-on ytmusic-player-bar #volume-slider,
+html.ytmc-vol-on ytmusic-player-bar .volume,
+html.ytmc-vol-on ytmusic-player-bar #expand-volume,
+html.ytmc-vol-on ytmusic-player-bar #expand-volume-slider,
+html.ytmc-vol-on ytmusic-player-bar .bytm-volume {
+  display: none !important;
+}
+/* Avec Velvetone, notre barre de volume en blanc comme ses curseurs */
+:root[data-bytm] #ytmc-vol input::-webkit-slider-runnable-track {
+  background: linear-gradient(to right, #ececf1 var(--p), rgba(255, 255, 255, 0.16) var(--p));
+}
+/* Velvetone : le rond de la barre de progression était 1 px trop haut */
+:root[data-bytm] ytmusic-player-bar #progress-bar .slider-knob-inner {
+  translate: 0 1px;
+}
+
+/* Velvetone (data-bytm) en fenêtre étroite : sa barre de lecture fait se chevaucher les
+   boutons. On masque les secondaires (sous-titres, flèche du lecteur, haut-parleur : notre
+   barre de volume est à gauche, et le curseur de volume reste à droite). */
+@media (max-width: 1000px) {
+  :root[data-bytm] ytmusic-player-bar .captions,
+  :root[data-bytm] ytmusic-player-bar .toggle-player-page-button,
+  :root[data-bytm] ytmusic-player-bar .volume {
+    display: none !important;
+  }
+  :root[data-bytm] ytmusic-player-bar .shuffle {
+    transform: translateX(-10px);
+  }
+}
+@media (max-width: 760px) {
+  :root[data-bytm] ytmusic-player-bar .repeat {
+    display: none !important;
+  }
+}
